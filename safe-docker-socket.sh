@@ -2,6 +2,7 @@
 set -eu
 
 docker rm -f dockerproxy >/dev/null 2>&1 || true
+docker volume rm docker-proxy >/dev/null 2>&1 || true
 
 docker run -d \
   --name dockerproxy \
