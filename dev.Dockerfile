@@ -185,7 +185,8 @@ RUN groupadd --system linuxbrew \
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
     && mkdir -p /workspace \
-    && chmod 0777 /workspace
+    && chmod 0777 /workspace \
+    && printf '\nexport PS1="# "\n' >> /etc/skel/.bashrc
 
 RUN <<'EOF'
 cat > /usr/local/bin/dev-entrypoint <<'SCRIPT'
