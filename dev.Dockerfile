@@ -13,6 +13,7 @@ ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e
 ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
 ARG PNPM_VERSION=11.2.2
 ARG RIPGREP_VERSION=13.0.0-4+b2
+ARG VIM_VERSION=2:9.0.1378-2+deb12u2
 ARG BUBBLEWRAP_VERSION=0.8.0-2+deb12u1
 ARG BUBBLEWRAP_SHA256_AMD64=3cc9134a3286ad01a323dcd924ba123eb634cefaeec82d774257e06308aeaadb
 ARG BUBBLEWRAP_SHA256_ARM64=d044ba1d7961d835669035fcd1e11121f1dc960a1a2e1c6489a93ea44e083557
@@ -73,6 +74,8 @@ RUN apt-get update \
         "ripgrep=${RIPGREP_VERSION}" \
         sudo \
         tzdata \
+        "vim-common=${VIM_VERSION}" \
+        "vim-tiny=${VIM_VERSION}" \
         xz-utils \
         zlib1g-dev \
     && image_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
@@ -88,6 +91,7 @@ RUN apt-get update \
     && rm "/tmp/${bubblewrap_deb}" \
     && bwrap --version \
     && rg --version \
+    && vi --version \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
