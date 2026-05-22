@@ -28,13 +28,71 @@ docker run --rm -it \
   local-dev:latest
 ```
 
-The image includes Go, Node 24, Python, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git, Git LFS, jq, ripgrep (`rg`), bubblewrap, pnpm, PostgreSQL, bash, and the Docker CLI.
+The image includes Go, Node 24, Python with pip/venv, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH client, jq, ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, bubblewrap, pnpm, PostgreSQL, bash, build tools, common dev headers, and the Docker CLI with the Compose plugin.
 
-The Docker CLI is client-only. To let it talk to the host Docker daemon, mount a Docker socket when needed:
+### Persistent Tool State
+
+For throwaway containers using the default `dev` user, keep the checkout mounted at `/workspace` and mount `dev-volume` as the container home. This keeps container-created home state such as `~/.codex` and `~/.ssh` available across dev containers without mounting `~/.ssh` from the host:
+
+```sh
+docker volume create dev-volume
+
+docker run --rm -it \
+  -v "$PWD:/workspace" \
+  --mount type=volume,source=dev-volume,target=/home/dev \
+  --mount type=bind,source="$HOME/.gitconfig",target=/home/dev/.gitconfig,readonly \
+  local-dev:latest
+```
+
+Docker supports this mount layering: `dev-volume` backs `/home/dev`, and the more specific `.gitconfig` bind mount overlays only `/home/dev/.gitconfig`.
+
+The entrypoint creates `~/.ssh` with `0700` permissions. Put container-specific SSH keys or config there from inside the container, and keep private keys at `0600` so OpenSSH accepts them. Any container that mounts `dev-volume` can access this SSH material.
+
+Use the same shared home volume when mounting the Docker socket:
 
 ```sh
 docker run --rm -it \
   -v "$PWD:/workspace" \
+  --mount type=volume,source=dev-volume,target=/home/dev \
+  --mount type=bind,source="$HOME/.gitconfig",target=/home/dev/.gitconfig,readonly \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  local-dev:latest
+```
+
+### Git Worktrees
+
+If you use Git worktrees from both the host and this container, use Git 2.48.0 or newer everywhere that will touch the repository. This image builds Git 2.54.0.
+
+Enable relative worktree links in `~/.gitconfig` before creating worktrees:
+
+```ini
+[worktree]
+    useRelativePaths = true
+```
+
+Equivalent command:
+
+```sh
+git config --global worktree.useRelativePaths true
+```
+
+The container sees the checkout at `/workspace`, while the host usually sees the same files at a different absolute path. Git worktrees store links between the main checkout and linked worktrees, so absolute links written in one environment may not exist in the other. Relative links keep the worktrees usable as long as the repository and its worktree directories move together.
+
+Existing absolute-path worktrees should be recreated or repaired with Git 2.48.0 or newer:
+
+```sh
+git worktree repair --relative-paths
+```
+
+Relative worktree links enable Git's `extensions.relativeWorktrees` repository extension, so older Git versions will reject those repositories.
+
+The Docker CLI and Compose plugin are client-only. To let them talk to the host Docker daemon, mount a Docker socket when needed:
+
+```sh
+docker run --rm -it \
+  -v "$PWD:/workspace" \
+  --mount type=volume,source=dev-volume,target=/home/dev \
+  --mount type=bind,source="$HOME/.gitconfig",target=/home/dev/.gitconfig,readonly \
   -v /var/run/docker.sock:/var/run/docker.sock \
   local-dev:latest
 ```
@@ -44,6 +102,8 @@ If you use the safe Docker socket proxy below, mount the proxy volume instead:
 ```sh
 docker run --rm -it \
   -v "$PWD:/workspace" \
+  --mount type=volume,source=dev-volume,target=/home/dev \
+  --mount type=bind,source="$HOME/.gitconfig",target=/home/dev/.gitconfig,readonly \
   -v docker-proxy:/var/run \
   local-dev:latest
 ```

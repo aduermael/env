@@ -21,6 +21,7 @@ ARG CODEX_VERSION=rust-v0.133.0
 ARG CODEX_SHA256_AMD64=d06019ab9c35d281b78dc2ebb2ae55c2bb97ea11bf7f452bafe390eddb0034ef
 ARG CODEX_SHA256_ARM64=268bfe8cf8154940fea256df75cd441c54a0c71e6c8ccd45ab3f76ff28ba1413
 ARG DOCKER_CLI_VERSION=5:29.5.2-1~debian.12~bookworm
+ARG DOCKER_COMPOSE_PLUGIN_VERSION=5.1.4-1~debian.12~bookworm
 ARG CLAUDE_CODE_VERSION=2.1.146
 ARG GEMINI_CLI_VERSION=0.42.0
 ARG LUAU_VERSION=0.721
@@ -54,6 +55,7 @@ RUN apt-get update \
         gnupg \
         gosu \
         jq \
+        less \
         libatomic1 \
         libcurl4-openssl-dev \
         libexpat1-dev \
@@ -63,7 +65,9 @@ RUN apt-get update \
         locales \
         lua5.4 \
         luarocks \
+        openssh-client \
         passwd \
+        pkg-config \
         postgresql-${PG_MAJOR} \
         postgresql-client-${PG_MAJOR} \
         procps \
@@ -73,10 +77,13 @@ RUN apt-get update \
         python3-venv \
         "ripgrep=${RIPGREP_VERSION}" \
         sudo \
+        tree \
         tzdata \
+        unzip \
         "vim-common=${VIM_VERSION}" \
         "vim-tiny=${VIM_VERSION}" \
         xz-utils \
+        zip \
         zlib1g-dev \
     && image_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "${image_arch}" in \
@@ -133,9 +140,12 @@ RUN set -eux; \
     . /etc/os-release; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list; \
     apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "docker-ce-cli=${DOCKER_CLI_VERSION}"; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        "docker-ce-cli=${DOCKER_CLI_VERSION}" \
+        "docker-compose-plugin=${DOCKER_COMPOSE_PLUGIN_VERSION}"; \
     rm -rf /var/lib/apt/lists/*; \
-    docker --version
+    docker --version; \
+    docker compose version
 
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
@@ -296,7 +306,9 @@ fi
 home_dir="$(getent passwd "${user_name}" | cut -d: -f6)"
 install -d -m 0755 -o "${uid}" -g "${gid}" "${home_dir}"
 install -d -m 0700 -o "${uid}" -g "${gid}" "${home_dir}/.codex"
+install -d -m 0700 -o "${uid}" -g "${gid}" "${home_dir}/.ssh"
 chown -R "${uid}:${gid}" "${home_dir}/.codex" 2>/dev/null || true
+chown -R "${uid}:${gid}" "${home_dir}/.ssh" 2>/dev/null || true
 mkdir -p "${workspace}"
 install -d -m 0775 -o "${uid}" -g "${gid}" /go /go/bin /go/pkg
 
