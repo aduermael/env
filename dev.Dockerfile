@@ -238,6 +238,8 @@ fi
 
 home_dir="$(getent passwd "${user_name}" | cut -d: -f6)"
 install -d -m 0755 -o "${uid}" -g "${gid}" "${home_dir}"
+install -d -m 0700 -o "${uid}" -g "${gid}" "${home_dir}/.codex"
+chown -R "${uid}:${gid}" "${home_dir}/.codex" 2>/dev/null || true
 mkdir -p "${workspace}"
 install -d -m 0775 -o "${uid}" -g "${gid}" /go /go/bin /go/pkg
 
