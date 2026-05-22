@@ -4,6 +4,10 @@ FROM debian:bookworm
 ARG GO_VERSION=1.26.3
 ARG GO_SHA256_AMD64=2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556
 ARG GO_SHA256_ARM64=9d89a3ea57d141c2b22d70083f2c8459ba3890f2d9e818e7e933b75614936565
+ARG GIT_VERSION=2.54.0
+ARG GIT_SHA256=f689162364c10de79ef89aa8dbf48731eb057e34edbbd20aca510ce0154681a3
+ARG GIT_SIGNING_KEY=96E07AF25771955980DAD10020D04E5A713660A7
+ARG GIT_SIGNING_KEY_TAG=dd20f6ea53bf6828baba3e2f279bf633eaae6815
 ARG NODE_VERSION=24.15.0
 ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
 ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
@@ -46,10 +50,15 @@ RUN apt-get update \
         file \
         git \
         git-lfs \
+        gnupg \
         gosu \
         jq \
         libatomic1 \
+        libcurl4-openssl-dev \
+        libexpat1-dev \
+        libpcre2-dev \
         libpq-dev \
+        libssl-dev \
         locales \
         lua5.4 \
         luarocks \
@@ -65,6 +74,7 @@ RUN apt-get update \
         sudo \
         tzdata \
         xz-utils \
+        zlib1g-dev \
     && image_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "${image_arch}" in \
         amd64|x86_64) bubblewrap_arch="amd64"; bubblewrap_sha256="${BUBBLEWRAP_SHA256_AMD64}" ;; \
@@ -79,6 +89,26 @@ RUN apt-get update \
     && bwrap --version \
     && rg --version \
     && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    mkdir -p /tmp/git-key; \
+    git init -q /tmp/git-key; \
+    git -C /tmp/git-key fetch -q --depth=1 https://git.kernel.org/pub/scm/git/git.git refs/tags/junio-gpg-pub; \
+    test "$(git -C /tmp/git-key rev-parse FETCH_HEAD)" = "${GIT_SIGNING_KEY_TAG}"; \
+    git -C /tmp/git-key cat-file blob 'FETCH_HEAD^{}' > /tmp/git-signing-key.asc; \
+    gpg --batch --import /tmp/git-signing-key.asc; \
+    gpg --batch --list-keys --with-colons "${GIT_SIGNING_KEY}" | grep -q "^fpr:::::::::${GIT_SIGNING_KEY}:"; \
+    curl -fsSL "https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.xz" -o /tmp/git.tar.xz; \
+    curl -fsSL "https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.sign" -o /tmp/git.tar.sign; \
+    echo "${GIT_SHA256}  /tmp/git.tar.xz" | sha256sum -c -; \
+    xz -cd /tmp/git.tar.xz | gpg --batch --verify /tmp/git.tar.sign -; \
+    mkdir -p /tmp/git-src; \
+    tar -xJf /tmp/git.tar.xz -C /tmp/git-src --strip-components=1; \
+    make -C /tmp/git-src -j"$(nproc)" prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease USE_LIBPCRE2=YesPlease all; \
+    make -C /tmp/git-src prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease USE_LIBPCRE2=YesPlease install; \
+    rm -rf "${GNUPGHOME}" /tmp/git-key /tmp/git-signing-key.asc /tmp/git-src /tmp/git.tar.sign /tmp/git.tar.xz; \
+    git --version
 
 RUN groupadd --system devtools \
     && git lfs install --system \
