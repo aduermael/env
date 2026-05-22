@@ -230,7 +230,11 @@ if [[ -z "${user_name}" ]]; then
     if id "${user_name}" >/dev/null 2>&1; then
         user_name="${requested_name}-${uid}"
     fi
-    useradd --uid "${uid}" --gid "${gid}" --create-home --shell /bin/bash "${user_name}"
+    useradd_home_args=(--create-home)
+    if [[ -e "/home/${user_name}" ]]; then
+        useradd_home_args=(--no-create-home)
+    fi
+    useradd --uid "${uid}" --gid "${gid}" "${useradd_home_args[@]}" --shell /bin/bash "${user_name}"
 elif [[ "${user_name}" != "${requested_name}" && "${LOCAL_ALLOW_EXISTING_USER:-0}" != "1" ]]; then
     echo "UID ${uid} already belongs to ${user_name}; set LOCAL_USER_NAME=${user_name} or LOCAL_ALLOW_EXISTING_USER=1 to use it." >&2
     exit 1
