@@ -8,6 +8,9 @@ ARG NODE_VERSION=24.15.0
 ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
 ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
 ARG PNPM_VERSION=11.2.2
+ARG BUBBLEWRAP_VERSION=0.8.0-2+deb12u1
+ARG BUBBLEWRAP_SHA256_AMD64=3cc9134a3286ad01a323dcd924ba123eb634cefaeec82d774257e06308aeaadb
+ARG BUBBLEWRAP_SHA256_ARM64=d044ba1d7961d835669035fcd1e11121f1dc960a1a2e1c6489a93ea44e083557
 ARG CODEX_VERSION=rust-v0.133.0
 ARG CODEX_SHA256_AMD64=d06019ab9c35d281b78dc2ebb2ae55c2bb97ea11bf7f452bafe390eddb0034ef
 ARG CODEX_SHA256_ARM64=268bfe8cf8154940fea256df75cd441c54a0c71e6c8ccd45ab3f76ff28ba1413
@@ -60,6 +63,18 @@ RUN apt-get update \
         sudo \
         tzdata \
         xz-utils \
+    && image_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+    && case "${image_arch}" in \
+        amd64|x86_64) bubblewrap_arch="amd64"; bubblewrap_sha256="${BUBBLEWRAP_SHA256_AMD64}" ;; \
+        arm64|aarch64) bubblewrap_arch="arm64"; bubblewrap_sha256="${BUBBLEWRAP_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for bubblewrap: ${image_arch}" >&2; exit 1 ;; \
+    esac \
+    && bubblewrap_deb="bubblewrap_${BUBBLEWRAP_VERSION}_${bubblewrap_arch}.deb" \
+    && curl -fsSL "https://deb.debian.org/debian/pool/main/b/bubblewrap/${bubblewrap_deb}" -o "/tmp/${bubblewrap_deb}" \
+    && echo "${bubblewrap_sha256}  /tmp/${bubblewrap_deb}" | sha256sum -c - \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "/tmp/${bubblewrap_deb}" \
+    && rm "/tmp/${bubblewrap_deb}" \
+    && bwrap --version \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system devtools \

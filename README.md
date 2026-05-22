@@ -28,7 +28,7 @@ docker run --rm -it \
   local-dev:latest
 ```
 
-The image includes Go, Node 24, Python, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git, Git LFS, jq, pnpm, PostgreSQL, bash, and the Docker CLI.
+The image includes Go, Node 24, Python, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git, Git LFS, jq, bubblewrap, pnpm, PostgreSQL, bash, and the Docker CLI.
 
 The Docker CLI is client-only. To let it talk to the host Docker daemon, mount a Docker socket when needed:
 
