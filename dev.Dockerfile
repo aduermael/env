@@ -8,6 +8,7 @@ ARG NODE_VERSION=24.15.0
 ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
 ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
 ARG PNPM_VERSION=11.2.2
+ARG RIPGREP_VERSION=13.0.0-4+b2
 ARG BUBBLEWRAP_VERSION=0.8.0-2+deb12u1
 ARG BUBBLEWRAP_SHA256_AMD64=3cc9134a3286ad01a323dcd924ba123eb634cefaeec82d774257e06308aeaadb
 ARG BUBBLEWRAP_SHA256_ARM64=d044ba1d7961d835669035fcd1e11121f1dc960a1a2e1c6489a93ea44e083557
@@ -60,6 +61,7 @@ RUN apt-get update \
         python3 \
         python3-pip \
         python3-venv \
+        "ripgrep=${RIPGREP_VERSION}" \
         sudo \
         tzdata \
         xz-utils \
@@ -75,6 +77,7 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "/tmp/${bubblewrap_deb}" \
     && rm "/tmp/${bubblewrap_deb}" \
     && bwrap --version \
+    && rg --version \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system devtools \
@@ -199,6 +202,7 @@ RUN groupadd --system linuxbrew \
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
+    && install -d -m 0755 /home/dev \
     && mkdir -p /workspace \
     && chmod 0777 /workspace \
     && printf '\nexport PS1="# "\n' >> /etc/skel/.bashrc
