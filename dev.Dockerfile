@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM debian:bookworm
+FROM debian:bookworm@sha256:ed4fcc40bb1162b6d2d32e7bec15044d13963779abbe63f67f1cd62b06220519
 
 ARG GO_VERSION=1.26.3
 ARG GO_SHA256_AMD64=2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556
@@ -12,6 +12,10 @@ ARG NODE_VERSION=24.15.0
 ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
 ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
 ARG PNPM_VERSION=11.2.2
+ARG RUST_VERSION=1.95.0
+ARG RUSTUP_VERSION=1.29.0
+ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
 ARG RIPGREP_VERSION=13.0.0-4+b2
 ARG VIM_VERSION=2:9.0.1378-2+deb12u2
 ARG BUBBLEWRAP_VERSION=0.8.0-2+deb12u1
@@ -32,6 +36,8 @@ ARG PG_MAJOR=15
 ARG TARGETARCH
 
 ENV GOPATH=/go \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
     PG_MAJOR=${PG_MAJOR} \
     PGDATA=/workspace/.postgres-data \
     PNPM_HOME=/usr/local/share/pnpm \
@@ -39,7 +45,7 @@ ENV GOPATH=/go \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     HOMEBREW_NO_ANALYTICS=1 \
     HOMEBREW_NO_AUTO_UPDATE=1 \
-    PATH=/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -50,10 +56,13 @@ RUN apt-get update \
         ca-certificates \
         curl \
         file \
+        ffmpeg \
         git \
         git-lfs \
         gnupg \
         gosu \
+        imagemagick \
+        iputils-ping \
         jq \
         less \
         libatomic1 \
@@ -66,6 +75,7 @@ RUN apt-get update \
         lua5.4 \
         luarocks \
         openssh-client \
+        pandoc \
         passwd \
         pkg-config \
         postgresql-${PG_MAJOR} \
@@ -80,6 +90,7 @@ RUN apt-get update \
         tree \
         tzdata \
         unzip \
+        weasyprint \
         "vim-common=${VIM_VERSION}" \
         "vim-tiny=${VIM_VERSION}" \
         xz-utils \
@@ -97,7 +108,13 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "/tmp/${bubblewrap_deb}" \
     && rm "/tmp/${bubblewrap_deb}" \
     && bwrap --version \
+    && ffmpeg -version \
+    && identify -version \
+    && pandoc --version \
+    && ping -V \
     && rg --version \
+    && ssh -V \
+    && weasyprint --version \
     && vi --version \
     && rm -rf /var/lib/apt/lists/*
 
@@ -127,11 +144,37 @@ RUN groupadd --system devtools \
     && update-alternatives --set lua-compiler /usr/bin/luac5.4 \
     && printf '%s\n' \
         'export GOPATH=/go' \
+        'export CARGO_HOME=/usr/local/cargo' \
+        'export RUSTUP_HOME=/usr/local/rustup' \
         'export PNPM_HOME=/usr/local/share/pnpm' \
         'export COREPACK_HOME=/usr/local/share/corepack' \
         'export COREPACK_ENABLE_DOWNLOAD_PROMPT=0' \
-        'export PATH="/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/sbin:/sbin:${PATH}"' \
+        'export PATH="/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/sbin:/sbin:${PATH}"' \
         > /etc/profile.d/dev-tools.sh
+
+RUN set -eux; \
+    mkdir -p "${RUSTUP_HOME}" "${CARGO_HOME}"; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) rust_host="x86_64-unknown-linux-gnu"; rustup_sha256="${RUSTUP_SHA256_AMD64}" ;; \
+        arm64|aarch64) rust_host="aarch64-unknown-linux-gnu"; rustup_sha256="${RUSTUP_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Rust: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    rustup_url="https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${rust_host}/rustup-init"; \
+    curl -fsSL "${rustup_url}" -o /tmp/rustup-init; \
+    echo "${rustup_sha256}  /tmp/rustup-init" | sha256sum -c -; \
+    chmod +x /tmp/rustup-init; \
+    /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "${RUST_VERSION}" --default-host "${rust_host}"; \
+    rm /tmp/rustup-init; \
+    rustup component add clippy rustfmt; \
+    rustup --version; \
+    rustc --version; \
+    cargo --version; \
+    rustfmt --version; \
+    cargo clippy --version; \
+    chgrp -R devtools "${RUSTUP_HOME}" "${CARGO_HOME}"; \
+    chmod -R g+rwX,a+rX "${RUSTUP_HOME}" "${CARGO_HOME}"; \
+    find "${RUSTUP_HOME}" "${CARGO_HOME}" -type d -exec chmod g+s {} +
 
 RUN set -eux; \
     install -m 0755 -d /etc/apt/keyrings; \

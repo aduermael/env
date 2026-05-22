@@ -28,7 +28,7 @@ docker run --rm -it \
   local-dev:latest
 ```
 
-The image includes Go, Node 24, Python with pip/venv, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH client, jq, ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, bubblewrap, pnpm, PostgreSQL, bash, build tools, common dev headers, and the Docker CLI with the Compose plugin.
+The image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH client, `ping`, jq, ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, bubblewrap, pnpm, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint, bash, build tools, common dev headers, and the Docker CLI with the Compose plugin.
 
 ### Persistent Tool State
 
