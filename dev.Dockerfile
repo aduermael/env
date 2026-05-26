@@ -298,6 +298,63 @@ RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && printf '\nexport PS1="# "\n' >> /etc/skel/.bashrc
 
 RUN <<'EOF'
+cat > /usr/local/bin/codex-sandbox-check <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+status=0
+
+fail() {
+    printf 'fail: %s\n' "$*" >&2
+    status=1
+}
+
+ok() {
+    printf 'ok: %s\n' "$*"
+}
+
+if command -v bwrap >/dev/null 2>&1; then
+    ok "$(bwrap --version)"
+else
+    fail "bubblewrap is not installed"
+fi
+
+if [[ -r /proc/sys/kernel/unprivileged_userns_clone ]]; then
+    userns_clone="$(cat /proc/sys/kernel/unprivileged_userns_clone)"
+    if [[ "${userns_clone}" == "1" ]]; then
+        ok "kernel.unprivileged_userns_clone=1"
+    else
+        fail "kernel.unprivileged_userns_clone=${userns_clone}; enable it on the Linux host"
+    fi
+else
+    ok "kernel.unprivileged_userns_clone is not exposed on this kernel"
+fi
+
+if [[ -r /proc/sys/user/max_user_namespaces ]]; then
+    max_user_namespaces="$(cat /proc/sys/user/max_user_namespaces)"
+    if [[ "${max_user_namespaces}" =~ ^[0-9]+$ && "${max_user_namespaces}" -gt 0 ]]; then
+        ok "user.max_user_namespaces=${max_user_namespaces}"
+    else
+        fail "user.max_user_namespaces=${max_user_namespaces}; user namespaces are disabled"
+    fi
+fi
+
+if bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / /usr/bin/true >/dev/null 2>&1; then
+    ok "bubblewrap can create an unprivileged user namespace"
+else
+    fail "bubblewrap cannot create an unprivileged user namespace"
+    printf '%s\n' \
+        "hint: start the container with --security-opt seccomp=unconfined" \
+        "hint: on Linux hosts, also set kernel.unprivileged_userns_clone=1" \
+        "hint: if AppArmor still blocks user namespaces, add --security-opt apparmor=unconfined"
+fi
+
+exit "${status}"
+SCRIPT
+chmod 0755 /usr/local/bin/codex-sandbox-check
+EOF
+
+RUN <<'EOF'
 cat > /usr/local/bin/dev-entrypoint <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
