@@ -18,9 +18,6 @@ ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89
 ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
 ARG RIPGREP_VERSION=13.0.0-4+b2
 ARG VIM_VERSION=2:9.0.1378-2+deb12u2
-ARG BUBBLEWRAP_VERSION=0.8.0-2+deb12u1
-ARG BUBBLEWRAP_SHA256_AMD64=3cc9134a3286ad01a323dcd924ba123eb634cefaeec82d774257e06308aeaadb
-ARG BUBBLEWRAP_SHA256_ARM64=d044ba1d7961d835669035fcd1e11121f1dc960a1a2e1c6489a93ea44e083557
 ARG CODEX_VERSION=rust-v0.133.0
 ARG CODEX_SHA256_AMD64=d06019ab9c35d281b78dc2ebb2ae55c2bb97ea11bf7f452bafe390eddb0034ef
 ARG CODEX_SHA256_ARM64=268bfe8cf8154940fea256df75cd441c54a0c71e6c8ccd45ab3f76ff28ba1413
@@ -96,19 +93,6 @@ RUN apt-get update \
         xz-utils \
         zip \
         zlib1g-dev \
-    && image_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
-    && case "${image_arch}" in \
-        amd64|x86_64) bubblewrap_arch="amd64"; bubblewrap_sha256="${BUBBLEWRAP_SHA256_AMD64}" ;; \
-        arm64|aarch64) bubblewrap_arch="arm64"; bubblewrap_sha256="${BUBBLEWRAP_SHA256_ARM64}" ;; \
-        *) echo "Unsupported image architecture for bubblewrap: ${image_arch}" >&2; exit 1 ;; \
-    esac \
-    && bubblewrap_deb="bubblewrap_${BUBBLEWRAP_VERSION}_${bubblewrap_arch}.deb" \
-    && curl -fsSL "https://deb.debian.org/debian/pool/main/b/bubblewrap/${bubblewrap_deb}" -o "/tmp/${bubblewrap_deb}" \
-    && echo "${bubblewrap_sha256}  /tmp/${bubblewrap_deb}" | sha256sum -c - \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "/tmp/${bubblewrap_deb}" \
-    && rm "/tmp/${bubblewrap_deb}" \
-    && test "$(dpkg-query -W -f='${Version}' bubblewrap)" = "${BUBBLEWRAP_VERSION}" \
-    && bwrap --version \
     && ffmpeg -version \
     && identify -version \
     && pandoc --version \
@@ -145,6 +129,11 @@ RUN groupadd --system devtools \
     && git lfs install --system \
     && update-alternatives --set lua-interpreter /usr/bin/lua5.4 \
     && update-alternatives --set lua-compiler /usr/bin/luac5.4 \
+    && install -d -m 0755 /etc/skel/.codex \
+    && printf '%s\n' \
+        'sandbox_mode = "danger-full-access"' \
+        > /etc/skel/.codex/config.toml \
+    && chmod 0600 /etc/skel/.codex/config.toml \
     && printf '%s\n' \
         'export GOPATH=/go' \
         'export CARGO_HOME=/usr/local/cargo' \
@@ -256,9 +245,59 @@ RUN set -eux; \
     echo "${codex_sha256}  /tmp/codex.tar.gz" | sha256sum -c -; \
     mkdir -p /tmp/codex; \
     tar -xzf /tmp/codex.tar.gz -C /tmp/codex; \
-    install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/bin/codex; \
+    install -m 0755 -d /usr/local/libexec/codex; \
+    install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/libexec/codex/codex; \
     rm -rf /tmp/codex /tmp/codex.tar.gz; \
-    codex --version
+    /usr/local/libexec/codex/codex --version
+
+RUN <<'EOF'
+cat > /usr/local/bin/codex <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+real=/usr/local/libexec/codex/codex
+args=()
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --sandbox|-s)
+            shift
+            if [[ "$#" -gt 0 ]]; then
+                shift
+            fi
+            ;;
+        --sandbox=*)
+            shift
+            ;;
+        -s*)
+            shift
+            ;;
+        --config|-c)
+            if [[ "$#" -gt 1 && "$2" == sandbox_mode=* ]]; then
+                shift 2
+            elif [[ "$#" -gt 1 ]]; then
+                args+=("$1" "$2")
+                shift 2
+            else
+                args+=("$1")
+                shift
+            fi
+            ;;
+        --config=sandbox_mode=*|-c=sandbox_mode=*)
+            shift
+            ;;
+        *)
+            args+=("$1")
+            shift
+            ;;
+    esac
+done
+
+exec "${real}" --sandbox danger-full-access "${args[@]}"
+SCRIPT
+chmod 0755 /usr/local/bin/codex
+codex --version
+EOF
 
 RUN set -eux; \
     pnpm add -g \
@@ -295,64 +334,8 @@ RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && install -d -m 0755 /home/dev \
     && mkdir -p /workspace \
     && chmod 0777 /workspace \
+    && printf '\nalias codex="codex --sandbox danger-full-access"\n' >> /etc/bash.bashrc \
     && printf '\nexport PS1="# "\n' >> /etc/skel/.bashrc
-
-RUN <<'EOF'
-cat > /usr/local/bin/codex-sandbox-check <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-
-status=0
-
-fail() {
-    printf 'fail: %s\n' "$*" >&2
-    status=1
-}
-
-ok() {
-    printf 'ok: %s\n' "$*"
-}
-
-if command -v bwrap >/dev/null 2>&1; then
-    ok "$(bwrap --version)"
-else
-    fail "bubblewrap is not installed"
-fi
-
-if [[ -r /proc/sys/kernel/unprivileged_userns_clone ]]; then
-    userns_clone="$(cat /proc/sys/kernel/unprivileged_userns_clone)"
-    if [[ "${userns_clone}" == "1" ]]; then
-        ok "kernel.unprivileged_userns_clone=1"
-    else
-        fail "kernel.unprivileged_userns_clone=${userns_clone}; enable it on the Linux host"
-    fi
-else
-    ok "kernel.unprivileged_userns_clone is not exposed on this kernel"
-fi
-
-if [[ -r /proc/sys/user/max_user_namespaces ]]; then
-    max_user_namespaces="$(cat /proc/sys/user/max_user_namespaces)"
-    if [[ "${max_user_namespaces}" =~ ^[0-9]+$ && "${max_user_namespaces}" -gt 0 ]]; then
-        ok "user.max_user_namespaces=${max_user_namespaces}"
-    else
-        fail "user.max_user_namespaces=${max_user_namespaces}; user namespaces are disabled"
-    fi
-fi
-
-if bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / /usr/bin/true >/dev/null 2>&1; then
-    ok "bubblewrap can create an unprivileged user namespace"
-else
-    fail "bubblewrap cannot create an unprivileged user namespace"
-    printf '%s\n' \
-        "hint: start the container with --security-opt seccomp=unconfined" \
-        "hint: on Linux hosts, also set kernel.unprivileged_userns_clone=1" \
-        "hint: if AppArmor still blocks user namespaces, add --security-opt apparmor=unconfined"
-fi
-
-exit "${status}"
-SCRIPT
-chmod 0755 /usr/local/bin/codex-sandbox-check
-EOF
 
 RUN <<'EOF'
 cat > /usr/local/bin/dev-entrypoint <<'SCRIPT'
@@ -418,6 +401,12 @@ install -d -m 0775 -o "${uid}" -g "${gid}" /go /go/bin /go/pkg
 if [[ ! -f "${home_dir}/.bashrc" && -f /etc/skel/.bashrc ]]; then
     cp /etc/skel/.bashrc "${home_dir}/.bashrc"
     chown "${uid}:${gid}" "${home_dir}/.bashrc"
+fi
+
+if [[ ! -f "${home_dir}/.codex/config.toml" && -f /etc/skel/.codex/config.toml ]]; then
+    cp /etc/skel/.codex/config.toml "${home_dir}/.codex/config.toml"
+    chown "${uid}:${gid}" "${home_dir}/.codex/config.toml"
+    chmod 0600 "${home_dir}/.codex/config.toml"
 fi
 
 usermod -aG sudo,linuxbrew,devtools "${user_name}"
