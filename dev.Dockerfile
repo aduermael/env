@@ -121,6 +121,7 @@ RUN set -eux; \
     make -C /tmp/git-src -j"$(nproc)" prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease USE_LIBPCRE2=YesPlease all; \
     make -C /tmp/git-src prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease USE_LIBPCRE2=YesPlease install; \
     rm -rf "${GNUPGHOME}" /tmp/git-key /tmp/git-signing-key.asc /tmp/git-src /tmp/git.tar.sign /tmp/git.tar.xz; \
+    hash -r; \
     test "$(command -v git)" = "/usr/local/bin/git"; \
     test "$(git --version)" = "git version ${GIT_VERSION}"; \
     git --version
