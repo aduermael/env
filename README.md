@@ -3,6 +3,16 @@ Environment setup files
 
 ## Local Dev Container
 
+If you use Git worktrees, configure them to store relative paths so the same
+worktree metadata works both with host-side Git auth and inside dev containers:
+
+```sh
+git config --global worktree.useRelativePaths true
+```
+
+When `~/.gitconfig` is mounted into a dev container, the container inherits this
+setting.
+
 Build the local development image:
 
 ```sh
