@@ -30,6 +30,40 @@ docker run --rm -it \
 
 The image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH client, `ping`, jq, ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, bubblewrap, pnpm, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint, bash, build tools, common dev headers, and the Docker CLI with the Compose plugin.
 
+### Codex Sandbox
+
+The image includes bubblewrap so Codex can use its Linux sandbox inside the dev container. Docker's default seccomp profile blocks the namespace syscalls bubblewrap needs, so start the container with seccomp disabled when you want nested Codex sandboxing:
+
+```sh
+docker run --rm -it \
+  --security-opt seccomp=unconfined \
+  -v "$PWD:/workspace" \
+  local-dev:latest
+```
+
+On Linux hosts, user namespaces must also be enabled on the host kernel:
+
+```sh
+sudo sysctl -w kernel.unprivileged_userns_clone=1
+```
+
+Persist that setting on Debian/Ubuntu-style hosts with:
+
+```sh
+printf '%s\n' 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/99-local-dev-userns.conf
+sudo sysctl --system
+```
+
+After the container starts, verify Codex can use bubblewrap:
+
+```sh
+codex-sandbox-check
+```
+
+On AppArmor-enforcing Linux hosts, if the check still reports that bubblewrap cannot create an unprivileged user namespace, add `--security-opt apparmor=unconfined` or install a narrower host AppArmor profile that permits user namespace creation for this container.
+
+Do not mount sensitive host paths or the Docker socket into containers where Codex runs with broad autonomy. Use the safe Docker socket proxy below if Docker CLI access is needed.
+
 ### Persistent Tool State
 
 For throwaway containers using the default `dev` user, keep the checkout mounted at `/workspace` and mount `dev-volume` as the container home. This keeps container-created home state such as `~/.codex` and `~/.ssh` available across dev containers without mounting `~/.ssh` from the host:
