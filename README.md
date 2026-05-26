@@ -28,41 +28,9 @@ docker run --rm -it \
   local-dev:latest
 ```
 
-The image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH client, `ping`, jq, ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, bubblewrap, pnpm, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint, bash, build tools, common dev headers, and the Docker CLI with the Compose plugin.
+The image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau, Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH client, `ping`, jq, ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, pnpm, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint, bash, build tools, common dev headers, and the Docker CLI with the Compose plugin.
 
-### Codex Sandbox
-
-The image includes bubblewrap so Codex can use its Linux sandbox inside the dev container. Docker's default seccomp profile blocks the namespace syscalls bubblewrap needs, so start the container with seccomp disabled when you want nested Codex sandboxing:
-
-```sh
-docker run --rm -it \
-  --security-opt seccomp=unconfined \
-  -v "$PWD:/workspace" \
-  local-dev:latest
-```
-
-On Linux hosts, user namespaces must also be enabled on the host kernel:
-
-```sh
-sudo sysctl -w kernel.unprivileged_userns_clone=1
-```
-
-Persist that setting on Debian/Ubuntu-style hosts with:
-
-```sh
-printf '%s\n' 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/99-local-dev-userns.conf
-sudo sysctl --system
-```
-
-After the container starts, verify Codex can use bubblewrap:
-
-```sh
-codex-sandbox-check
-```
-
-On AppArmor-enforcing Linux hosts, if the check still reports that bubblewrap cannot create an unprivileged user namespace, add `--security-opt apparmor=unconfined` or install a narrower host AppArmor profile that permits user namespace creation for this container.
-
-Do not mount sensitive host paths or the Docker socket into containers where Codex runs with broad autonomy. Use the safe Docker socket proxy below if Docker CLI access is needed.
+Codex is configured to run without its own sandbox inside this image because the container is the isolation boundary. Do not mount sensitive host paths into containers where Codex runs with broad autonomy. Use the safe Docker socket proxy below if Docker CLI access is needed.
 
 ### Persistent Tool State
 
@@ -82,14 +50,14 @@ Docker supports this mount layering: `dev-volume` backs `/home/dev`, and the mor
 
 The entrypoint creates `~/.ssh` with `0700` permissions. Put container-specific SSH keys or config there from inside the container, and keep private keys at `0600` so OpenSSH accepts them. Any container that mounts `dev-volume` can access this SSH material.
 
-Use the same shared home volume when mounting the Docker socket:
+Use the same shared home volume when mounting the safe Docker socket proxy:
 
 ```sh
 docker run --rm -it \
   -v "$PWD:/workspace" \
   --mount type=volume,source=dev-volume,target=/home/dev \
   --mount type=bind,source="$HOME/.gitconfig",target=/home/dev/.gitconfig,readonly \
-  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v docker-proxy:/var/run \
   local-dev:latest
 ```
 
@@ -120,18 +88,7 @@ git worktree repair --relative-paths
 
 Relative worktree links enable Git's `extensions.relativeWorktrees` repository extension, so older Git versions will reject those repositories.
 
-The Docker CLI and Compose plugin are client-only. To let them talk to the host Docker daemon, mount a Docker socket when needed:
-
-```sh
-docker run --rm -it \
-  -v "$PWD:/workspace" \
-  --mount type=volume,source=dev-volume,target=/home/dev \
-  --mount type=bind,source="$HOME/.gitconfig",target=/home/dev/.gitconfig,readonly \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  local-dev:latest
-```
-
-If you use the safe Docker socket proxy below, mount the proxy volume instead:
+The Docker CLI and Compose plugin are client-only. To let them talk to the host Docker daemon, mount the safe Docker socket proxy volume when needed:
 
 ```sh
 docker run --rm -it \

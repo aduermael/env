@@ -22,5 +22,5 @@ dev() {
 }
 
 dev_with_docker() {
-  _dev_run -v /var/run/docker.sock:/var/run/docker.sock "$@"
+  _dev_run -v docker-proxy:/var/run "$@"
 }
