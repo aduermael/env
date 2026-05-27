@@ -18,9 +18,9 @@ ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89
 ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
 ARG RIPGREP_VERSION=13.0.0-4+b2
 ARG VIM_VERSION=2:9.0.1378-2+deb12u2
-ARG CODEX_VERSION=rust-v0.133.0
-ARG CODEX_SHA256_AMD64=d06019ab9c35d281b78dc2ebb2ae55c2bb97ea11bf7f452bafe390eddb0034ef
-ARG CODEX_SHA256_ARM64=268bfe8cf8154940fea256df75cd441c54a0c71e6c8ccd45ab3f76ff28ba1413
+ARG CODEX_VERSION=rust-v0.134.0
+ARG CODEX_SHA256_AMD64=e54b983c3ab5ca992da8edde83bb29a545761a72c4fa39f18a165d9e792e1c71
+ARG CODEX_SHA256_ARM64=8e066f998111eb8b44250ac11df004daa07fadf276c5942a7183cb8e421091a3
 ARG DOCKER_CLI_VERSION=5:29.5.2-1~debian.12~bookworm
 ARG DOCKER_COMPOSE_PLUGIN_VERSION=5.1.4-1~debian.12~bookworm
 ARG CLAUDE_CODE_VERSION=2.1.146
@@ -42,6 +42,7 @@ ENV GOPATH=/go \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     HOMEBREW_NO_ANALYTICS=1 \
     HOMEBREW_NO_AUTO_UPDATE=1 \
+    TERM=xterm-256color \
     PATH=/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -71,6 +72,7 @@ RUN apt-get update \
         locales \
         lua5.4 \
         luarocks \
+        ncurses-term \
         openssh-client \
         pandoc \
         passwd \

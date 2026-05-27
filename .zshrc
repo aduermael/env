@@ -11,10 +11,19 @@ _dev_docker_run() {
   local -a args=(
     --rm
     -it
+    -e "TERM=${TERM:-xterm-256color}"
     -v "$PWD:/workspace"
     --mount type=volume,source=dev-volume,target=/home/dev
     --mount "type=bind,source=$HOME/.gitconfig,target=/home/dev/.gitconfig,readonly"
   )
+
+  [[ -n "${COLORTERM:-}" ]] && args+=(-e "COLORTERM=$COLORTERM")
+  [[ -n "${TERM_PROGRAM:-}" ]] && args+=(-e "TERM_PROGRAM=$TERM_PROGRAM")
+  [[ -n "${TERM_PROGRAM_VERSION:-}" ]] && args+=(-e "TERM_PROGRAM_VERSION=$TERM_PROGRAM_VERSION")
+  [[ -n "${KITTY_WINDOW_ID:-}" ]] && args+=(-e "KITTY_WINDOW_ID=$KITTY_WINDOW_ID")
+  [[ -n "${WEZTERM_PANE:-}" ]] && args+=(-e "WEZTERM_PANE=$WEZTERM_PANE")
+  [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]] && args+=(-e "GHOSTTY_RESOURCES_DIR=$GHOSTTY_RESOURCES_DIR")
+  [[ -n "${VTE_VERSION:-}" ]] && args+=(-e "VTE_VERSION=$VTE_VERSION")
 
   docker run "${args[@]}" "$@"
 }
