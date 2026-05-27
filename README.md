@@ -42,6 +42,8 @@ The image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau, Codex CLI
 
 Codex is configured to run without its own sandbox inside this image because the container is the isolation boundary. Do not mount sensitive host paths into containers where Codex runs with broad autonomy. Use the safe Docker socket proxy below if Docker CLI access is needed.
 
+Codex enhanced keyboard reporting is disabled by default with `CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1` to keep Ghostty/Kitty-style key sequences reliable through Docker TTYs. Set `CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=0` before running `dev` if you want to try the enhanced mode.
+
 ### Persistent Tool State
 
 For throwaway containers using the default `dev` user, keep the checkout mounted at `/workspace` and mount `dev-volume` as the container home. This keeps container-created home state such as `~/.codex` and `~/.ssh` available across dev containers without mounting `~/.ssh` from the host:

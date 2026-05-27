@@ -42,6 +42,7 @@ ENV GOPATH=/go \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     HOMEBREW_NO_ANALYTICS=1 \
     HOMEBREW_NO_AUTO_UPDATE=1 \
+    CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1 \
     TERM=xterm-256color \
     PATH=/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
