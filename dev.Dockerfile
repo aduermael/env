@@ -246,59 +246,9 @@ RUN set -eux; \
     echo "${codex_sha256}  /tmp/codex.tar.gz" | sha256sum -c -; \
     mkdir -p /tmp/codex; \
     tar -xzf /tmp/codex.tar.gz -C /tmp/codex; \
-    install -m 0755 -d /usr/local/libexec/codex; \
-    install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/libexec/codex/codex; \
+    install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/bin/codex; \
     rm -rf /tmp/codex /tmp/codex.tar.gz; \
-    /usr/local/libexec/codex/codex --version
-
-RUN <<'EOF'
-cat > /usr/local/bin/codex <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-
-real=/usr/local/libexec/codex/codex
-args=()
-
-while [[ "$#" -gt 0 ]]; do
-    case "$1" in
-        --sandbox|-s)
-            shift
-            if [[ "$#" -gt 0 ]]; then
-                shift
-            fi
-            ;;
-        --sandbox=*)
-            shift
-            ;;
-        -s*)
-            shift
-            ;;
-        --config|-c)
-            if [[ "$#" -gt 1 && "$2" == sandbox_mode=* ]]; then
-                shift 2
-            elif [[ "$#" -gt 1 ]]; then
-                args+=("$1" "$2")
-                shift 2
-            else
-                args+=("$1")
-                shift
-            fi
-            ;;
-        --config=sandbox_mode=*|-c=sandbox_mode=*)
-            shift
-            ;;
-        *)
-            args+=("$1")
-            shift
-            ;;
-    esac
-done
-
-exec "${real}" --sandbox danger-full-access "${args[@]}"
-SCRIPT
-chmod 0755 /usr/local/bin/codex
-codex --version
-EOF
+    codex --version
 
 RUN set -eux; \
     pnpm add -g \
@@ -335,7 +285,6 @@ RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && install -d -m 0755 /home/dev \
     && mkdir -p /workspace \
     && chmod 0777 /workspace \
-    && printf '\nalias codex="codex --sandbox danger-full-access"\n' >> /etc/bash.bashrc \
     && printf '\nexport PS1="# "\n' >> /etc/skel/.bashrc
 
 RUN <<'EOF'
@@ -430,6 +379,7 @@ if [[ -S "${docker_socket}" ]]; then
 fi
 
 export HOME="${home_dir}"
+export CODEX_HOME="${home_dir}/.codex"
 export USER="${user_name}"
 export LOGNAME="${user_name}"
 export SHELL=/bin/bash
