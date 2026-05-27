@@ -117,10 +117,10 @@ sudo pg_ctlcluster 15 main start
 
 ## Safe Docker Socket
 
-Run this from GitHub:
+The tracked `.zshrc` sample runs this automatically before `dev_with_docker`. To start or refresh it manually, run this from GitHub:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/aduermael/env/main/safe-docker-socket.sh | sh
 ```
 
-This starts a `dockerproxy` container that exposes a proxied Docker Unix socket as `docker.sock` inside the `docker-proxy` Docker volume. Containers can mount that volume at `/var/run` so Docker CLI commands use the proxy at `/var/run/docker.sock` by default, while the proxy binds the real Docker socket read-only and blocks bind mounts with `SP_ALLOWBINDMOUNTFROM=/.no-bind-mounts-allowed`.
+This starts or reuses a `dockerproxy` container that exposes a proxied Docker Unix socket as `docker.sock` inside the `docker-proxy` Docker volume. Containers can mount that volume at `/var/run` so Docker CLI commands use the proxy at `/var/run/docker.sock` by default, while the proxy binds the real Docker socket read-only and blocks bind mounts with `SP_ALLOWBINDMOUNTFROM=/.no-bind-mounts-allowed`.

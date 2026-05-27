@@ -5,6 +5,8 @@ PROMPT="$ "
 alias dps='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}"'
 alias dpsp='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Ports}}"'
 
+_dev_env_dir="${DEV_ENV_DIR:-${${(%):-%N}:A:h}}"
+
 _dev_run() {
   local -a args=(
     --rm
@@ -17,10 +19,22 @@ _dev_run() {
   docker run "${args[@]}" "$@" local-dev:latest
 }
 
+_dev_ensure_docker_proxy() {
+  local proxy_script="${_dev_env_dir}/safe-docker-socket.sh"
+
+  if [[ ! -x "$proxy_script" ]]; then
+    echo "safe-docker-socket.sh not found at $proxy_script; set DEV_ENV_DIR to the env repo path." >&2
+    return 1
+  fi
+
+  "$proxy_script"
+}
+
 dev() {
   _dev_run "$@"
 }
 
 dev_with_docker() {
+  _dev_ensure_docker_proxy || return
   _dev_run -v docker-proxy:/var/run "$@"
 }
