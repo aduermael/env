@@ -117,7 +117,7 @@ sudo pg_ctlcluster 15 main start
 
 ## Safe Docker Socket
 
-The tracked `.zshrc` sample runs this automatically before `dev_with_docker`. To start or refresh it manually, run this from GitHub:
+The tracked `.zshrc` sample fetches this from GitHub automatically before `dev_with_docker`. To start or refresh it manually, run:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/aduermael/env/main/safe-docker-socket.sh | sh

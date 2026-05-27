@@ -5,7 +5,7 @@ PROMPT="$ "
 alias dps='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}"'
 alias dpsp='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Ports}}"'
 
-_dev_env_dir="${DEV_ENV_DIR:-${${(%):-%N}:A:h}}"
+_dev_safe_docker_socket_url="https://raw.githubusercontent.com/aduermael/env/main/safe-docker-socket.sh"
 
 _dev_run() {
   local -a args=(
@@ -20,14 +20,9 @@ _dev_run() {
 }
 
 _dev_ensure_docker_proxy() {
-  local proxy_script="${_dev_env_dir}/safe-docker-socket.sh"
+  setopt local_options pipe_fail
 
-  if [[ ! -x "$proxy_script" ]]; then
-    echo "safe-docker-socket.sh not found at $proxy_script; set DEV_ENV_DIR to the env repo path." >&2
-    return 1
-  fi
-
-  "$proxy_script"
+  command curl -fsSL "$_dev_safe_docker_socket_url" | command sh
 }
 
 dev() {
