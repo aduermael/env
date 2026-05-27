@@ -287,8 +287,7 @@ RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
     && install -d -m 0755 /home/dev \
     && mkdir -p /workspace \
-    && chmod 0777 /workspace \
-    && printf '\nexport PS1="# "\n' >> /etc/skel/.bashrc
+    && chmod 0777 /workspace
 
 RUN <<'EOF'
 cat > /usr/local/bin/dev-entrypoint <<'SCRIPT'
@@ -354,6 +353,25 @@ install -d -m 0775 -o "${uid}" -g "${gid}" /go /go/bin /go/pkg
 if [[ ! -f "${home_dir}/.bashrc" && -f /etc/skel/.bashrc ]]; then
     cp /etc/skel/.bashrc "${home_dir}/.bashrc"
     chown "${uid}:${gid}" "${home_dir}/.bashrc"
+elif [[ ! -f "${home_dir}/.bashrc" ]]; then
+    install -m 0644 -o "${uid}" -g "${gid}" /dev/null "${home_dir}/.bashrc"
+fi
+
+bashrc="${home_dir}/.bashrc"
+if ! grep -Fq '# >>> env dev prompt >>>' "${bashrc}"; then
+    if ! cat >> "${bashrc}" <<'PROMPT'
+
+# >>> env dev prompt >>>
+if [[ "${DEV_CONTAINER_DISABLE_PS1:-0}" != "1" ]]; then
+    case $- in
+        *i*) PS1="${DEV_CONTAINER_PS1:-# }" ;;
+    esac
+fi
+# <<< env dev prompt <<<
+PROMPT
+    then
+        echo "warning: could not update ${bashrc} with dev prompt" >&2
+    fi
 fi
 
 if [[ ! -f "${home_dir}/.codex/config.toml" && -f /etc/skel/.codex/config.toml ]]; then
