@@ -7,7 +7,7 @@ alias dpsp='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Ports}}"'
 
 _dev_safe_docker_socket_url="https://raw.githubusercontent.com/aduermael/env/main/safe-docker-socket.sh"
 
-_dev_run() {
+_dev_docker_run() {
   local -a args=(
     --rm
     -it
@@ -16,7 +16,11 @@ _dev_run() {
     --mount "type=bind,source=$HOME/.gitconfig,target=/home/dev/.gitconfig,readonly"
   )
 
-  docker run "${args[@]}" "$@" local-dev:latest
+  docker run "${args[@]}" "$@"
+}
+
+_dev_run() {
+  _dev_docker_run "$@" local-dev:latest
 }
 
 _dev_ensure_docker_proxy() {
@@ -32,4 +36,13 @@ dev() {
 dev_with_docker() {
   _dev_ensure_docker_proxy || return
   _dev_run -v docker-proxy:/var/run "$@"
+}
+
+codex() {
+  _dev_docker_run local-dev:latest codex "$@"
+}
+
+codex_with_docker() {
+  _dev_ensure_docker_proxy || return
+  _dev_docker_run -v docker-proxy:/var/run local-dev:latest codex "$@"
 }
