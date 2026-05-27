@@ -18,13 +18,8 @@ ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89
 ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
 ARG RIPGREP_VERSION=13.0.0-4+b2
 ARG VIM_VERSION=2:9.0.1378-2+deb12u2
-ARG CODEX_VERSION=rust-v0.134.0
-ARG CODEX_SHA256_AMD64=e54b983c3ab5ca992da8edde83bb29a545761a72c4fa39f18a165d9e792e1c71
-ARG CODEX_SHA256_ARM64=8e066f998111eb8b44250ac11df004daa07fadf276c5942a7183cb8e421091a3
 ARG DOCKER_CLI_VERSION=5:29.5.2-1~debian.12~bookworm
 ARG DOCKER_COMPOSE_PLUGIN_VERSION=5.1.4-1~debian.12~bookworm
-ARG CLAUDE_CODE_VERSION=2.1.146
-ARG GEMINI_CLI_VERSION=0.42.0
 ARG LUAU_VERSION=0.721
 ARG LUAU_SHA256=b36924a114a76b4a48f02bcfbd14dfd0bb1c5b3a2f4bf246f254db50c031c061
 ARG HOMEBREW_INSTALL_COMMIT=d2b324899b9210d534475560acecbc77bc47bc17
@@ -36,14 +31,11 @@ ENV GOPATH=/go \
     CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
     PG_MAJOR=${PG_MAJOR} \
-    PGDATA=/workspace/.postgres-data \
     PNPM_HOME=/usr/local/share/pnpm \
     COREPACK_HOME=/usr/local/share/corepack \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     HOMEBREW_NO_ANALYTICS=1 \
     HOMEBREW_NO_AUTO_UPDATE=1 \
-    CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1 \
-    TERM=xterm-256color \
     PATH=/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -236,36 +228,6 @@ RUN set -eux; \
     luau-analyze /tmp/luau-smoke.luau; \
     rm -rf /tmp/luau-src /tmp/luau.tgz /tmp/luau-smoke.luau
 
-RUN set -eux; \
-    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    case "${image_arch}" in \
-        amd64|x86_64) codex_target="x86_64-unknown-linux-musl"; codex_sha256="${CODEX_SHA256_AMD64}" ;; \
-        arm64|aarch64) codex_target="aarch64-unknown-linux-musl"; codex_sha256="${CODEX_SHA256_ARM64}" ;; \
-        *) echo "Unsupported image architecture for Codex: ${image_arch}" >&2; exit 1 ;; \
-    esac; \
-    codex_asset="codex-${codex_target}.tar.gz"; \
-    codex_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${codex_asset}"; \
-    curl -fsSL "${codex_url}" -o /tmp/codex.tar.gz; \
-    echo "${codex_sha256}  /tmp/codex.tar.gz" | sha256sum -c -; \
-    mkdir -p /tmp/codex; \
-    tar -xzf /tmp/codex.tar.gz -C /tmp/codex; \
-    install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/bin/codex; \
-    rm -rf /tmp/codex /tmp/codex.tar.gz; \
-    codex --version
-
-RUN set -eux; \
-    pnpm add -g \
-        "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-        "@google/gemini-cli@${GEMINI_CLI_VERSION}"; \
-    claude_pkg="$(pnpm list -g --depth -1 --json @anthropic-ai/claude-code | jq -r '.[0].dependencies["@anthropic-ai/claude-code"].path')"; \
-    node "${claude_pkg}/install.cjs"; \
-    claude --version; \
-    gemini --version; \
-    pnpm store prune; \
-    chgrp -R devtools "${COREPACK_HOME}" "${PNPM_HOME}"; \
-    chmod -R g+rwX,a+rX "${COREPACK_HOME}" "${PNPM_HOME}"; \
-    find "${COREPACK_HOME}" "${PNPM_HOME}" -type d -exec chmod g+s {} +
-
 RUN groupadd --system linuxbrew \
     && useradd --system --gid linuxbrew --create-home --home-dir /home/linuxbrew --shell /bin/bash linuxbrew \
     && echo "linuxbrew ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/linuxbrew-install \
@@ -282,6 +244,44 @@ RUN groupadd --system linuxbrew \
     && chgrp -R linuxbrew /home/linuxbrew/.linuxbrew \
     && chmod -R g+rwX /home/linuxbrew/.linuxbrew \
     && find /home/linuxbrew/.linuxbrew -type d -exec chmod g+s {} +
+
+# Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
+# layers. Version bumps here should only rebuild these layers and cheap final setup.
+ARG GEMINI_CLI_VERSION=0.42.0
+RUN set -eux; \
+    pnpm add -g "@google/gemini-cli@${GEMINI_CLI_VERSION}"; \
+    gemini --version
+
+ARG CLAUDE_CODE_VERSION=2.1.146
+RUN set -eux; \
+    pnpm add -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
+    claude_pkg="$(pnpm list -g --depth -1 --json @anthropic-ai/claude-code | jq -r '.[0].dependencies["@anthropic-ai/claude-code"].path')"; \
+    node "${claude_pkg}/install.cjs"; \
+    claude --version; \
+    pnpm store prune; \
+    chgrp -R devtools "${COREPACK_HOME}" "${PNPM_HOME}"; \
+    chmod -R g+rwX,a+rX "${COREPACK_HOME}" "${PNPM_HOME}"; \
+    find "${COREPACK_HOME}" "${PNPM_HOME}" -type d -exec chmod g+s {} +
+
+ARG CODEX_VERSION=rust-v0.134.0
+ARG CODEX_SHA256_AMD64=e54b983c3ab5ca992da8edde83bb29a545761a72c4fa39f18a165d9e792e1c71
+ARG CODEX_SHA256_ARM64=8e066f998111eb8b44250ac11df004daa07fadf276c5942a7183cb8e421091a3
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) codex_target="x86_64-unknown-linux-musl"; codex_sha256="${CODEX_SHA256_AMD64}" ;; \
+        arm64|aarch64) codex_target="aarch64-unknown-linux-musl"; codex_sha256="${CODEX_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Codex: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    codex_asset="codex-${codex_target}.tar.gz"; \
+    codex_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${codex_asset}"; \
+    curl -fsSL "${codex_url}" -o /tmp/codex.tar.gz; \
+    echo "${codex_sha256}  /tmp/codex.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/codex; \
+    tar -xzf /tmp/codex.tar.gz -C /tmp/codex; \
+    install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/bin/codex; \
+    rm -rf /tmp/codex /tmp/codex.tar.gz; \
+    codex --version
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
@@ -391,6 +391,12 @@ exec gosu "${user_name}" "$@"
 SCRIPT
 chmod 0755 /usr/local/bin/dev-entrypoint
 EOF
+
+# Runtime-only defaults stay late so simple CLI-experience tweaks do not
+# invalidate the expensive tool installation layers.
+ENV PGDATA=/workspace/.postgres-data \
+    CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1 \
+    TERM=xterm-256color
 
 WORKDIR /workspace
 ENTRYPOINT ["dev-entrypoint"]
