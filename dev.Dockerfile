@@ -322,7 +322,7 @@ if [[ -z "${group_name}" ]]; then
     if getent group "${group_name}" >/dev/null; then
         group_name="${requested_name}-${gid}"
     fi
-    groupadd --gid "${gid}" "${group_name}"
+    groupadd -K GID_MIN=0 --gid "${gid}" "${group_name}"
 fi
 
 user_name="$(getent passwd "${uid}" | cut -d: -f1 || true)"
@@ -335,7 +335,7 @@ if [[ -z "${user_name}" ]]; then
     if [[ -e "/home/${user_name}" ]]; then
         useradd_home_args=(--no-create-home)
     fi
-    useradd --uid "${uid}" --gid "${gid}" "${useradd_home_args[@]}" --shell /bin/bash "${user_name}"
+    useradd -K UID_MIN=0 --uid "${uid}" --gid "${gid}" "${useradd_home_args[@]}" --shell /bin/bash "${user_name}"
 elif [[ "${user_name}" != "${requested_name}" && "${LOCAL_ALLOW_EXISTING_USER:-0}" != "1" ]]; then
     echo "UID ${uid} already belongs to ${user_name}; set LOCAL_USER_NAME=${user_name} or LOCAL_ALLOW_EXISTING_USER=1 to use it." >&2
     exit 1
@@ -393,7 +393,7 @@ if [[ -S "${docker_socket}" ]]; then
             if getent group "${docker_group}" >/dev/null; then
                 docker_group="docker-host-${docker_gid}"
             fi
-            groupadd --gid "${docker_gid}" "${docker_group}"
+            groupadd -K GID_MIN=0 --gid "${docker_gid}" "${docker_group}"
         fi
         usermod -aG "${docker_group}" "${user_name}"
     fi

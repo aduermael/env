@@ -1,0 +1,1 @@
+bin/devenv filter=lfs diff=lfs merge=lfs -text
