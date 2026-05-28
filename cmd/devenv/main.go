@@ -1054,10 +1054,6 @@ func devDockerRunArgs(cfg config, command []string) ([]string, error) {
 		args = append(args, "-it")
 	}
 
-	if userName := os.Getenv("USER"); userName != "" {
-		args = append(args, "-e", "LOCAL_USER_NAME="+userName)
-	}
-
 	for _, name := range []string{
 		"TERM",
 		"COLORTERM",
