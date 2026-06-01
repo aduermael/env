@@ -36,6 +36,7 @@ ENV GOPATH=/go \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     HOMEBREW_NO_ANALYTICS=1 \
     HOMEBREW_NO_AUTO_UPDATE=1 \
+    GH_TELEMETRY=false \
     PATH=/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -139,6 +140,7 @@ RUN groupadd --system devtools \
         'export PNPM_HOME=/usr/local/share/pnpm' \
         'export COREPACK_HOME=/usr/local/share/corepack' \
         'export COREPACK_ENABLE_DOWNLOAD_PROMPT=0' \
+        'export GH_TELEMETRY=false' \
         'export PATH="/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/sbin:/sbin:${PATH}"' \
         > /etc/profile.d/dev-tools.sh
 
@@ -246,6 +248,25 @@ RUN groupadd --system linuxbrew \
     && chgrp -R linuxbrew /home/linuxbrew/.linuxbrew \
     && chmod -R g+rwX /home/linuxbrew/.linuxbrew \
     && find /home/linuxbrew/.linuxbrew -type d -exec chmod g+s {} +
+
+ARG GITHUB_CLI_VERSION=2.93.0
+ARG GITHUB_CLI_SHA256_AMD64=02d1290eba130e0b896f3709ffff22e1c75a51475ddb70476a85abc6b5807af0
+ARG GITHUB_CLI_SHA256_ARM64=c55feb33684abba57e9909737340d5b39282257c0363e1edde6785ac4a413be7
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) gh_arch="amd64"; gh_sha256="${GITHUB_CLI_SHA256_AMD64}" ;; \
+        arm64|aarch64) gh_arch="arm64"; gh_sha256="${GITHUB_CLI_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for GitHub CLI: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    gh_file="gh_${GITHUB_CLI_VERSION}_linux_${gh_arch}.tar.gz"; \
+    curl -fsSL "https://github.com/cli/cli/releases/download/v${GITHUB_CLI_VERSION}/${gh_file}" -o "/tmp/${gh_file}"; \
+    echo "${gh_sha256}  /tmp/${gh_file}" | sha256sum -c -; \
+    mkdir -p /tmp/gh; \
+    tar -xzf "/tmp/${gh_file}" -C /tmp/gh --strip-components=1; \
+    install -m 0755 /tmp/gh/bin/gh /usr/local/bin/gh; \
+    rm -rf /tmp/gh "/tmp/${gh_file}"; \
+    gh --version
 
 ARG UV_VERSION=0.11.17
 ARG UV_SHA256_AMD64=0017ccecaeb4d431d7f93b583ebff0c5c38e00eb734fcf13d05f72ca419125fe
