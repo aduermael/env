@@ -59,6 +59,7 @@ RUN apt-get update \
         libatomic1 \
         libcurl4-openssl-dev \
         libexpat1-dev \
+        libglib2.0-dev \
         libpcre2-dev \
         libpq-dev \
         libssl-dev \
@@ -92,6 +93,7 @@ RUN apt-get update \
     && identify -version \
     && pandoc --version \
     && ping -V \
+    && pkg-config --exists gio-2.0 glib-2.0 gobject-2.0 \
     && rg --version \
     && ssh -V \
     && weasyprint --version \
@@ -244,6 +246,27 @@ RUN groupadd --system linuxbrew \
     && chgrp -R linuxbrew /home/linuxbrew/.linuxbrew \
     && chmod -R g+rwX /home/linuxbrew/.linuxbrew \
     && find /home/linuxbrew/.linuxbrew -type d -exec chmod g+s {} +
+
+ARG UV_VERSION=0.11.17
+ARG UV_SHA256_AMD64=0017ccecaeb4d431d7f93b583ebff0c5c38e00eb734fcf13d05f72ca419125fe
+ARG UV_SHA256_ARM64=de008880a903ac2c5654647dc19a75c0d6652313c977a2bc5ce05e1e3a93429e
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) uv_target="x86_64-unknown-linux-gnu"; uv_sha256="${UV_SHA256_AMD64}" ;; \
+        arm64|aarch64) uv_target="aarch64-unknown-linux-gnu"; uv_sha256="${UV_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for uv: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    uv_file="uv-${uv_target}.tar.gz"; \
+    curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${uv_file}" -o "/tmp/${uv_file}"; \
+    echo "${uv_sha256}  /tmp/${uv_file}" | sha256sum -c -; \
+    mkdir -p /tmp/uv; \
+    tar -xzf "/tmp/${uv_file}" -C /tmp/uv --strip-components=1; \
+    install -m 0755 /tmp/uv/uv /usr/local/bin/uv; \
+    install -m 0755 /tmp/uv/uvx /usr/local/bin/uvx; \
+    rm -rf /tmp/uv "/tmp/${uv_file}"; \
+    uv --version; \
+    uvx --version
 
 # Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
 # layers. Version bumps here should only rebuild these layers and cheap final setup.
