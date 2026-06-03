@@ -231,8 +231,8 @@ containers without forcing the user to re-authenticate tools.
 
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH
-client, GitHub CLI (`gh`), `ping`, jq, ripgrep (`rg`), `tree`, `less`,
-`pkg-config`, zip/unzip, pnpm, PostgreSQL, ffmpeg, ImageMagick, pandoc,
+client, GitHub CLI (`gh`), Modal CLI, `ping`, jq, ripgrep (`rg`), `tree`,
+`less`, `pkg-config`, zip/unzip, pnpm, PostgreSQL, ffmpeg, ImageMagick, pandoc,
 WeasyPrint, bash, build tools, common dev headers, and the Docker CLI with the
 Compose plugin.
 

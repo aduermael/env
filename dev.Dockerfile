@@ -289,6 +289,18 @@ RUN set -eux; \
     uv --version; \
     uvx --version
 
+ARG MODAL_CLI_VERSION=1.4.3
+RUN set -eux; \
+    UV_TOOL_DIR=/usr/local/share/uv/tools \
+    UV_TOOL_BIN_DIR=/usr/local/bin \
+    uv tool install \
+        --python /usr/bin/python3 \
+        --no-managed-python \
+        --no-python-downloads \
+        --no-cache \
+        "modal==${MODAL_CLI_VERSION}"; \
+    modal --version
+
 # Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
 # layers. Version bumps here should only rebuild these layers and cheap final setup.
 ARG GEMINI_CLI_VERSION=0.42.0
