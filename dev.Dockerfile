@@ -319,9 +319,9 @@ RUN set -eux; \
     chmod -R g+rwX,a+rX "${COREPACK_HOME}" "${PNPM_HOME}"; \
     find "${COREPACK_HOME}" "${PNPM_HOME}" -type d -exec chmod g+s {} +
 
-ARG CODEX_VERSION=rust-v0.136.0
-ARG CODEX_SHA256_AMD64=dadad6c9db74500ad5431fa178b30288fdbdda6bdf3397634db6e1f5981321cf
-ARG CODEX_SHA256_ARM64=9dba0b8054541854b3cc3c12c25f52d6a441c90d87520e5260df56c09ba3eace
+ARG CODEX_VERSION=rust-v0.137.0
+ARG CODEX_SHA256_AMD64=d96e88313b95597e9cbb8704f6db16dbb81c07142b08cfb628479ab433696931
+ARG CODEX_SHA256_ARM64=1b9cae96e27f5da2752054a5bba9204d486939ea60c65df4ba4a638458734bda
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
