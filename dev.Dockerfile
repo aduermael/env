@@ -43,6 +43,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        age \
         bash \
         build-essential \
         ca-certificates \
@@ -91,6 +92,7 @@ RUN apt-get update \
         zip \
         zlib1g-dev \
     && ffmpeg -version \
+    && age --version \
     && identify -version \
     && pandoc --version \
     && ping -V \
