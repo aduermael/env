@@ -64,6 +64,21 @@ go build -o ./bin/devenv ./cmd/devenv
 ./bin/devenv setup --source "$PWD"
 ```
 
+### Update Codex in the dev image
+
+Codex is pinned in `dev.Dockerfile` with checksums for both Linux image
+architectures. To update it to the latest upstream release:
+
+```sh
+scripts/update-codex.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-codex.sh 0.141.0
+```
+
 ## CLI Reference
 
 ```sh
