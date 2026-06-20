@@ -23,6 +23,8 @@ devenv down
 
 ## Build the CLI
 
+### Initial setup
+
 Normal setup can use a prebuilt macOS `devenv` binary. To build it from this
 checkout while developing:
 
@@ -43,6 +45,23 @@ It cannot update the already-running parent shell. Existing terminals need:
 
 ```sh
 source ~/.zshrc
+```
+
+### Update to a new version
+
+After getting the new revision of the codebase:
+
+```sh
+# from repository root directory
+
+# remove old binary if it exists
+rm ./bin/devenv
+
+# build new binary
+go build -o ./bin/devenv ./cmd/devenv
+
+# self-install new binary
+./bin/devenv setup --source "$PWD"
 ```
 
 ## CLI Reference
