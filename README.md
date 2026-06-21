@@ -227,6 +227,18 @@ The SSH private key must be created with restrictive permissions, for example
 `0600`, and setup must never replace it after creation. Users can add the public
 key at `~/.devenv/ssh/id_ed25519.pub` to GitHub or another Git host.
 
+## GitHub CLI (`gh`)
+
+Run GitHub CLI commands through the `dev` launcher from the host. To authenticate
+with GitHub:
+
+```sh
+dev gh auth login --hostname github.com --git-protocol ssh --web
+```
+
+Follow the instructions printed by `gh`. If your env SSH key is already uploaded
+on GitHub, skip the SSH key upload step.
+
 ## Safe Docker Socket
 
 Dev containers should not bind mount the host Docker socket directly. The CLI
