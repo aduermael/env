@@ -16,6 +16,8 @@ ARG RUST_VERSION=1.95.0
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
 ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
+ARG SWIFT_VERSION=6.3.2
+ARG SWIFT_RELEASE_SIGNING_KEY=52BB7E3DE28A71BE22EC05FFEF80A866B47A981F
 ARG RIPGREP_VERSION=13.0.0-4+b2
 ARG VIM_VERSION=2:9.0.1378-2+deb12u2
 ARG DOCKER_CLI_VERSION=5:29.5.2-1~debian.12~bookworm
@@ -30,6 +32,7 @@ ARG TARGETARCH
 ENV GOPATH=/go \
     CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
+    SWIFT_HOME=/usr/local/swift \
     PG_MAJOR=${PG_MAJOR} \
     PNPM_HOME=/usr/local/share/pnpm \
     COREPACK_HOME=/usr/local/share/corepack \
@@ -37,7 +40,7 @@ ENV GOPATH=/go \
     HOMEBREW_NO_ANALYTICS=1 \
     HOMEBREW_NO_AUTO_UPDATE=1 \
     GH_TELEMETRY=false \
-    PATH=/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/swift/usr/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -60,11 +63,17 @@ RUN apt-get update \
         less \
         libatomic1 \
         libcurl4-openssl-dev \
+        libedit-dev \
         libexpat1-dev \
         libglib2.0-dev \
+        libicu-dev \
+        libncurses-dev \
         libpcre2-dev \
         libpq-dev \
+        libpython3-dev \
+        libsqlite3-dev \
         libssl-dev \
+        libxml2-dev \
         locales \
         lua5.4 \
         luarocks \
@@ -85,6 +94,7 @@ RUN apt-get update \
         tree \
         tzdata \
         unzip \
+        uuid-dev \
         weasyprint \
         "vim-common=${VIM_VERSION}" \
         "vim-tiny=${VIM_VERSION}" \
@@ -139,11 +149,12 @@ RUN groupadd --system devtools \
         'export GOPATH=/go' \
         'export CARGO_HOME=/usr/local/cargo' \
         'export RUSTUP_HOME=/usr/local/rustup' \
+        'export SWIFT_HOME=/usr/local/swift' \
         'export PNPM_HOME=/usr/local/share/pnpm' \
         'export COREPACK_HOME=/usr/local/share/corepack' \
         'export COREPACK_ENABLE_DOWNLOAD_PROMPT=0' \
         'export GH_TELEMETRY=false' \
-        'export PATH="/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/sbin:/sbin:${PATH}"' \
+        'export PATH="/usr/local/cargo/bin:/usr/local/go/bin:/go/bin:/usr/local/swift/usr/bin:/usr/local/share/pnpm/bin:/usr/local/share/pnpm:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/lib/postgresql/${PG_MAJOR}/bin:/usr/local/sbin:/usr/sbin:/sbin:${PATH}"' \
         > /etc/profile.d/dev-tools.sh
 
 RUN set -eux; \
@@ -169,6 +180,34 @@ RUN set -eux; \
     chgrp -R devtools "${RUSTUP_HOME}" "${CARGO_HOME}"; \
     chmod -R g+rwX,a+rX "${RUSTUP_HOME}" "${CARGO_HOME}"; \
     find "${RUSTUP_HOME}" "${CARGO_HOME}" -type d -exec chmod g+s {} +
+
+RUN set -eux; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) swift_platform="debian12" ;; \
+        arm64|aarch64) swift_platform="debian12-aarch64" ;; \
+        *) echo "Unsupported image architecture for Swift: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    swift_release="swift-${SWIFT_VERSION}-RELEASE"; \
+    swift_file="${swift_release}-${swift_platform}.tar.gz"; \
+    swift_url="https://download.swift.org/swift-${SWIFT_VERSION}-release/${swift_platform}/${swift_release}/${swift_file}"; \
+    curl --compressed -fsSL https://swift.org/keys/all-keys.asc -o /tmp/swift-keys.asc; \
+    gpg --batch --import /tmp/swift-keys.asc; \
+    gpg --batch --list-keys --with-colons "${SWIFT_RELEASE_SIGNING_KEY}" | grep -q "^fpr:::::::::${SWIFT_RELEASE_SIGNING_KEY}:"; \
+    curl -fsSL "${swift_url}" -o "/tmp/${swift_file}"; \
+    curl -fsSL "${swift_url}.sig" -o "/tmp/${swift_file}.sig"; \
+    verify_output="$(gpg --batch --status-fd=1 --verify "/tmp/${swift_file}.sig" "/tmp/${swift_file}" 2>&1)"; \
+    printf '%s\n' "${verify_output}"; \
+    printf '%s\n' "${verify_output}" | grep -q "^\\[GNUPG:\\] VALIDSIG ${SWIFT_RELEASE_SIGNING_KEY} "; \
+    install -d -m 0755 "${SWIFT_HOME}"; \
+    tar -xzf "/tmp/${swift_file}" -C "${SWIFT_HOME}" --strip-components=1 --no-same-owner; \
+    swift --version; \
+    swiftc --version; \
+    printf 'print("swift-ok")\n' > /tmp/swift-smoke.swift; \
+    swiftc /tmp/swift-smoke.swift -o /tmp/swift-smoke; \
+    /tmp/swift-smoke; \
+    rm -rf "${GNUPGHOME}" /tmp/swift-keys.asc "/tmp/${swift_file}" "/tmp/${swift_file}.sig" /tmp/swift-smoke /tmp/swift-smoke.swift
 
 RUN set -eux; \
     install -m 0755 -d /etc/apt/keyrings; \
