@@ -510,7 +510,6 @@ EOF
 # Runtime-only defaults stay late so simple CLI-experience tweaks do not
 # invalidate the expensive tool installation layers.
 ENV PGDATA=/workspace/.postgres-data \
-    CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1 \
     TERM=xterm-256color
 
 WORKDIR /workspace
