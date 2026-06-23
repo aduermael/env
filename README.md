@@ -287,11 +287,9 @@ container is the isolation boundary. Do not mount sensitive host paths into
 containers where Codex runs with broad autonomy. Use the safe Docker socket proxy
 if Docker CLI access is needed.
 
-Codex enhanced keyboard reporting is disabled by default with
-`CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1` to keep Ghostty/Kitty-style key
-sequences reliable through Docker TTYs. Set
-`CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=0` before launching the container if you
-want to try the enhanced mode.
+Codex enhanced keyboard reporting follows Codex's default behavior. To force the
+legacy Docker TTY behavior, set `CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1`
+before launching the container.
 
 PostgreSQL is installed but not started automatically. Start the packaged
 cluster inside the container with:

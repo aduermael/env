@@ -12,7 +12,6 @@ _dev_docker_run() {
     --rm
     -it
     -e "TERM=${TERM:-xterm-256color}"
-    -e "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=${CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT:-1}"
     -v "$PWD:/workspace"
     --mount type=volume,source=dev-volume,target=/home/dev
     --mount "type=bind,source=$HOME/.gitconfig,target=/home/dev/.gitconfig,readonly"
@@ -25,6 +24,7 @@ _dev_docker_run() {
   [[ -n "${WEZTERM_PANE:-}" ]] && args+=(-e "WEZTERM_PANE=$WEZTERM_PANE")
   [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]] && args+=(-e "GHOSTTY_RESOURCES_DIR=$GHOSTTY_RESOURCES_DIR")
   [[ -n "${VTE_VERSION:-}" ]] && args+=(-e "VTE_VERSION=$VTE_VERSION")
+  [[ -n "${CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT:-}" ]] && args+=(-e "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=$CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT")
 
   docker run "${args[@]}" "$@"
 }
