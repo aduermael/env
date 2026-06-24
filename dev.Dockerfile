@@ -66,6 +66,7 @@ RUN apt-get update \
         libedit-dev \
         libexpat1-dev \
         libglib2.0-dev \
+        libgtk-4-dev \
         libicu-dev \
         libncurses-dev \
         libpcre2-dev \
@@ -73,6 +74,7 @@ RUN apt-get update \
         libpython3-dev \
         libsqlite3-dev \
         libssl-dev \
+        libwebkitgtk-6.0-dev \
         libxml2-dev \
         locales \
         lua5.4 \
@@ -106,7 +108,16 @@ RUN apt-get update \
     && identify -version \
     && pandoc --version \
     && ping -V \
-    && pkg-config --exists gio-2.0 glib-2.0 gobject-2.0 \
+    && pkg-config --exists \
+        cairo \
+        gdk-pixbuf-2.0 \
+        gio-2.0 \
+        glib-2.0 \
+        gobject-2.0 \
+        graphene-1.0 \
+        gtk4 \
+        pango \
+        webkitgtk-6.0 \
     && rg --version \
     && ssh -V \
     && weasyprint --version \
