@@ -1,0 +1,7 @@
+interface:
+  display_name: "Update Codex"
+  short_description: "Run the Codex dev image update flow"
+  default_prompt: "Use $update-codex to update the repo's Codex release pin and open a PR."
+
+policy:
+  allow_implicit_invocation: false
