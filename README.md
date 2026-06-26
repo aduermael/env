@@ -52,16 +52,7 @@ source ~/.zshrc
 After getting the new revision of the codebase:
 
 ```sh
-# from repository root directory
-
-# remove old binary if it exists
-rm ./bin/devenv
-
-# build new binary
-go build -o ./bin/devenv ./cmd/devenv
-
-# self-install new binary
-./bin/devenv setup --source "$PWD"
+scripts/update-devenv-from-source.sh
 ```
 
 ### Update Codex in the dev image
