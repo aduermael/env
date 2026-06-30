@@ -371,6 +371,23 @@ RUN set -eux; \
     chmod -R g+rwX,a+rX "${COREPACK_HOME}" "${PNPM_HOME}"; \
     find "${COREPACK_HOME}" "${PNPM_HOME}" -type d -exec chmod g+s {} +
 
+ARG GROK_CLI_VERSION=0.2.77
+ARG GROK_CLI_SHA256_AMD64=9a6733a16eef4692d830b146c9dec8042cdc124a97bc8cc0116972f7677e4670
+ARG GROK_CLI_SHA256_ARM64=4913c25b865ce27f5cbf65204a483c12b1e7445e3128e8cbdbcab272ae328437
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) grok_arch="x86_64"; grok_sha256="${GROK_CLI_SHA256_AMD64}" ;; \
+        arm64|aarch64) grok_arch="aarch64"; grok_sha256="${GROK_CLI_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Grok CLI: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    grok_url="https://x.ai/cli/grok-${GROK_CLI_VERSION}-linux-${grok_arch}"; \
+    curl -fsSL "${grok_url}" -o /tmp/grok; \
+    echo "${grok_sha256}  /tmp/grok" | sha256sum -c -; \
+    install -m 0755 /tmp/grok /usr/local/bin/grok; \
+    rm /tmp/grok; \
+    grok --version
+
 ARG CODEX_VERSION=rust-v0.142.4
 ARG CODEX_SHA256_AMD64=f0ac43751c6d3b29a973a860a8de528ad79cb20cc1296611930a3d5c91ddef95
 ARG CODEX_SHA256_ARM64=a546ee05915313fea340f8315b54f43d077f4390afbb5af2de944d48013d447f

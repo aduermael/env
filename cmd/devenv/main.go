@@ -1172,6 +1172,10 @@ claude() {
 gemini() {
   command devenv run --quiet -- gemini "$@"
 }
+
+grok() {
+  command devenv run --quiet -- grok "$@"
+}
 `)
 	fmt.Fprintf(&b, "%s\n", zshrcEndMarker)
 	return b.String()
