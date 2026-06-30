@@ -1160,18 +1160,6 @@ esac
 dev() {
   command devenv run --quiet -- "$@"
 }
-
-codex() {
-  command devenv run --quiet -- codex "$@"
-}
-
-claude() {
-  command devenv run --quiet -- claude "$@"
-}
-
-gemini() {
-  command devenv run --quiet -- gemini "$@"
-}
 `)
 	fmt.Fprintf(&b, "%s\n", zshrcEndMarker)
 	return b.String()

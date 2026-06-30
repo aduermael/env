@@ -15,9 +15,6 @@ After setup, a new zsh session should have these commands:
 
 ```sh
 dev
-codex
-claude
-gemini
 devenv down
 ```
 
@@ -118,8 +115,7 @@ The command must:
   shell functions have a stable command to call.
 - Initialize env-owned Git config and SSH identity files only when they are
   missing.
-- Install or update the generated zshrc block that defines `dev`, `codex`,
-  `claude`, and `gemini`.
+- Install or update the generated zshrc block that defines `dev`.
 - Start or repair the safe Docker socket proxy, then verify the proxy container
   is running and the proxied socket is usable.
 
@@ -149,27 +145,12 @@ esac
 dev() {
   devenv run --quiet -- "$@"
 }
-
-codex() {
-  devenv run --quiet -- codex "$@"
-}
-
-claude() {
-  devenv run --quiet -- claude "$@"
-}
-
-gemini() {
-  devenv run --quiet -- gemini "$@"
-}
 # <<< devenv <<<
 ```
 
 `dev` opens an interactive shell in the dev container with the current directory
 mounted at `/workspace`. Arguments passed to `dev` are forwarded to `devenv run`
 so callers can run a specific command in the same container environment.
-
-`codex`, `claude`, and `gemini` run the corresponding assistant CLI inside the
-dev container and forward all arguments unchanged.
 
 ## Host State Layout
 
@@ -267,11 +248,11 @@ containers without forcing the user to re-authenticate tools.
 ## Image Contents
 
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
-Codex CLI, Claude Code CLI, Gemini CLI, Homebrew, Git 2.54.0, Git LFS, OpenSSH
-client, GitHub CLI (`gh`), Modal CLI, `ping`, jq, ripgrep (`rg`), `tree`,
-`less`, `pkg-config`, zip/unzip, pnpm, PostgreSQL, ffmpeg, ImageMagick, pandoc,
-WeasyPrint, bash, build tools, common dev headers, and the Docker CLI with the
-Compose plugin.
+Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Homebrew, Git 2.54.0,
+Git LFS, OpenSSH client, GitHub CLI (`gh`), Modal CLI, `ping`, jq, ripgrep
+(`rg`), `tree`, `less`, `pkg-config`, zip/unzip, pnpm, PostgreSQL, ffmpeg,
+ImageMagick, pandoc, WeasyPrint, bash, build tools, common dev headers, and the
+Docker CLI with the Compose plugin.
 
 Codex is configured to run without its own sandbox inside this image because the
 container is the isolation boundary. Do not mount sensitive host paths into
