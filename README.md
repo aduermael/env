@@ -15,10 +15,6 @@ After setup, a new zsh session should have these commands:
 
 ```sh
 dev
-codex
-claude
-gemini
-grok
 devenv down
 ```
 
@@ -119,8 +115,7 @@ The command must:
   shell functions have a stable command to call.
 - Initialize env-owned Git config and SSH identity files only when they are
   missing.
-- Install or update the generated zshrc block that defines `dev`, `codex`,
-  `claude`, `gemini`, and `grok`.
+- Install or update the generated zshrc block that defines `dev`.
 - Start or repair the safe Docker socket proxy, then verify the proxy container
   is running and the proxied socket is usable.
 
@@ -150,31 +145,12 @@ esac
 dev() {
   devenv run --quiet -- "$@"
 }
-
-codex() {
-  devenv run --quiet -- codex "$@"
-}
-
-claude() {
-  devenv run --quiet -- claude "$@"
-}
-
-gemini() {
-  devenv run --quiet -- gemini "$@"
-}
-
-grok() {
-  devenv run --quiet -- grok "$@"
-}
 # <<< devenv <<<
 ```
 
 `dev` opens an interactive shell in the dev container with the current directory
 mounted at `/workspace`. Arguments passed to `dev` are forwarded to `devenv run`
 so callers can run a specific command in the same container environment.
-
-`codex`, `claude`, `gemini`, and `grok` run the corresponding assistant CLI
-inside the dev container and forward all arguments unchanged.
 
 ## Host State Layout
 
