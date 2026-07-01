@@ -388,9 +388,9 @@ RUN set -eux; \
     rm /tmp/grok; \
     grok --version
 
-ARG CODEX_VERSION=rust-v0.142.4
-ARG CODEX_SHA256_AMD64=f0ac43751c6d3b29a973a860a8de528ad79cb20cc1296611930a3d5c91ddef95
-ARG CODEX_SHA256_ARM64=a546ee05915313fea340f8315b54f43d077f4390afbb5af2de944d48013d447f
+ARG CODEX_VERSION=rust-v0.142.5
+ARG CODEX_SHA256_AMD64=cb933ec3cb61bf4b5fc88eecf5e6149829faa6172535b6ef0afb0154beb4aab8
+ARG CODEX_SHA256_ARM64=b18c75c49645918fae23beba0ab41c05f07941601510a2451ba97fe519573c38
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
