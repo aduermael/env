@@ -1,0 +1,7 @@
+interface:
+  display_name: "Update Grok Build"
+  short_description: "Run the Grok Build dev image update flow"
+  default_prompt: "Use $update-grok to update the repo's Grok Build CLI pin and open a PR."
+
+policy:
+  allow_implicit_invocation: false
