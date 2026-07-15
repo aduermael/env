@@ -12,6 +12,9 @@ ARG NODE_VERSION=24.15.0
 ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
 ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
 ARG PNPM_VERSION=11.2.2
+ARG BAZEL_VERSION=9.1.1
+ARG BAZEL_SHA256_AMD64=857bed5d2756b4d998d3caebf2d941d13d434c4eda4b1d6d7dda205736c25a93
+ARG BAZEL_SHA256_ARM64=82d1163884e45a6a7ff764cc01197b1b1ed497000726b84dc4b47c1dfc8a2bb4
 ARG RUST_VERSION=1.95.0
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
@@ -352,6 +355,21 @@ RUN set -eux; \
         --no-cache \
         "modal==${MODAL_CLI_VERSION}"; \
     modal --version
+
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) bazel_arch="x86_64"; bazel_sha256="${BAZEL_SHA256_AMD64}" ;; \
+        arm64|aarch64) bazel_arch="arm64"; bazel_sha256="${BAZEL_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Bazel: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    bazel_file="bazel-${BAZEL_VERSION}-linux-${bazel_arch}"; \
+    curl -fsSL "https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/${bazel_file}" -o "/tmp/${bazel_file}"; \
+    echo "${bazel_sha256}  /tmp/${bazel_file}" | sha256sum -c -; \
+    install -m 0755 "/tmp/${bazel_file}" /usr/local/bin/bazel; \
+    rm "/tmp/${bazel_file}"; \
+    test "$(bazel --version)" = "bazel ${BAZEL_VERSION}"; \
+    bazel --version
 
 # Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
 # layers. Version bumps here should only rebuild these layers and cheap final setup.
