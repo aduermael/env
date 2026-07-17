@@ -1,0 +1,7 @@
+interface:
+  display_name: "Update Cursor CLI"
+  short_description: "Run the Cursor CLI dev image update flow"
+  default_prompt: "Use $update-cursor to update the repo's Cursor CLI pin and open a PR."
+
+policy:
+  allow_implicit_invocation: false
