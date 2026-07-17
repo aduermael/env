@@ -426,6 +426,28 @@ RUN set -eux; \
     rm -rf /tmp/codex /tmp/codex.tar.gz; \
     codex --version
 
+ARG CURSOR_CLI_VERSION=2026.07.16-899851b
+ARG CURSOR_CLI_SHA256_AMD64=106acf6b3a3781cd279038726abc4f79f987449b9f5219b0f6e62d96c88fee6d
+ARG CURSOR_CLI_SHA256_ARM64=8ee8caf3f54aca6c73b68c13c0d64bdb989b1a65dfb6574414d9b030d0d10918
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) cursor_arch="x64"; cursor_sha256="${CURSOR_CLI_SHA256_AMD64}" ;; \
+        arm64|aarch64) cursor_arch="arm64"; cursor_sha256="${CURSOR_CLI_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Cursor CLI: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    cursor_url="https://downloads.cursor.com/lab/${CURSOR_CLI_VERSION}/linux/${cursor_arch}/agent-cli-package.tar.gz"; \
+    curl -fsSL "${cursor_url}" -o /tmp/cursor-agent.tar.gz; \
+    echo "${cursor_sha256}  /tmp/cursor-agent.tar.gz" | sha256sum -c -; \
+    cursor_dir="/usr/local/share/cursor-agent/versions/${CURSOR_CLI_VERSION}"; \
+    mkdir -p "${cursor_dir}"; \
+    tar --no-same-owner --strip-components=1 -xzf /tmp/cursor-agent.tar.gz -C "${cursor_dir}"; \
+    ln -s "${cursor_dir}/cursor-agent" /usr/local/bin/agent; \
+    ln -s "${cursor_dir}/cursor-agent" /usr/local/bin/cursor-agent; \
+    rm /tmp/cursor-agent.tar.gz; \
+    test "$(agent --version)" = "${CURSOR_CLI_VERSION}"; \
+    test "$(cursor-agent --version)" = "${CURSOR_CLI_VERSION}"
+
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
     && install -d -m 0755 /home/dev \
