@@ -12,9 +12,12 @@ ARG NODE_VERSION=24.15.0
 ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
 ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
 ARG PNPM_VERSION=11.2.2
-ARG BAZEL_VERSION=9.1.1
-ARG BAZEL_SHA256_AMD64=857bed5d2756b4d998d3caebf2d941d13d434c4eda4b1d6d7dda205736c25a93
-ARG BAZEL_SHA256_ARM64=82d1163884e45a6a7ff764cc01197b1b1ed497000726b84dc4b47c1dfc8a2bb4
+ARG BAZELISK_VERSION=1.29.0
+ARG BAZELISK_SHA256_AMD64=5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992
+ARG BAZELISK_SHA256_ARM64=e20e8b0f4f240091b7a55bf17b9398bd4f40ee70ae0208dff95dd4c445fb4010
+ARG BAZEL_VERSION=9.2.0
+ARG BAZEL_SHA256_AMD64=7668a95db1250f12c40407251e4e203b4ec8bf39bc495d2f485b2d8c99048694
+ARG BAZEL_SHA256_ARM64=049dd21f40ad979db11c3ee68c96a42ce75f1185e69ac61ab20de1501427a410
 ARG RUST_VERSION=1.95.0
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
@@ -356,20 +359,28 @@ RUN set -eux; \
         "modal==${MODAL_CLI_VERSION}"; \
     modal --version
 
+ENV BAZELISK_HOME=/usr/local/share/bazelisk \
+    USE_BAZEL_FALLBACK_VERSION=silent:${BAZEL_VERSION}
+
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
-        amd64|x86_64) bazel_arch="x86_64"; bazel_sha256="${BAZEL_SHA256_AMD64}" ;; \
-        arm64|aarch64) bazel_arch="arm64"; bazel_sha256="${BAZEL_SHA256_ARM64}" ;; \
-        *) echo "Unsupported image architecture for Bazel: ${image_arch}" >&2; exit 1 ;; \
+        amd64|x86_64) bazelisk_arch="amd64"; bazelisk_sha256="${BAZELISK_SHA256_AMD64}"; bazel_sha256="${BAZEL_SHA256_AMD64}" ;; \
+        arm64|aarch64) bazelisk_arch="arm64"; bazelisk_sha256="${BAZELISK_SHA256_ARM64}"; bazel_sha256="${BAZEL_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Bazelisk: ${image_arch}" >&2; exit 1 ;; \
     esac; \
-    bazel_file="bazel-${BAZEL_VERSION}-linux-${bazel_arch}"; \
-    curl -fsSL "https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/${bazel_file}" -o "/tmp/${bazel_file}"; \
-    echo "${bazel_sha256}  /tmp/${bazel_file}" | sha256sum -c -; \
-    install -m 0755 "/tmp/${bazel_file}" /usr/local/bin/bazel; \
-    rm "/tmp/${bazel_file}"; \
-    test "$(bazel --version)" = "bazel ${BAZEL_VERSION}"; \
-    bazel --version
+    bazelisk_file="bazelisk-linux-${bazelisk_arch}"; \
+    curl -fsSL "https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/${bazelisk_file}" -o "/tmp/${bazelisk_file}"; \
+    echo "${bazelisk_sha256}  /tmp/${bazelisk_file}" | sha256sum -c -; \
+    install -m 0755 "/tmp/${bazelisk_file}" /usr/local/bin/bazelisk; \
+    ln -s bazelisk /usr/local/bin/bazel; \
+    rm "/tmp/${bazelisk_file}"; \
+    test "$(bazelisk bazeliskVersion)" = "Bazelisk version: v${BAZELISK_VERSION}"; \
+    mkdir -p "${BAZELISK_HOME}"; \
+    test "$(BAZELISK_VERIFY_SHA256="${bazel_sha256}" USE_BAZEL_VERSION="${BAZEL_VERSION}" bazel --version)" = "bazel ${BAZEL_VERSION}"; \
+    chgrp -R devtools "${BAZELISK_HOME}"; \
+    chmod -R g+rwX,a+rX "${BAZELISK_HOME}"; \
+    find "${BAZELISK_HOME}" -type d -exec chmod g+s {} +
 
 # Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
 # layers. Version bumps here should only rebuild these layers and cheap final setup.
