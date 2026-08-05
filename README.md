@@ -70,7 +70,7 @@ scripts/update-codex.sh 0.141.0
 ### Update Grok Build in the dev image
 
 Grok Build is pinned in `dev.Dockerfile` with checksums for both Linux image
-architectures. To update it to the latest NPM `latest` release:
+architectures. To update it to the latest NPM `alpha` release:
 
 ```sh
 scripts/update-grok.sh

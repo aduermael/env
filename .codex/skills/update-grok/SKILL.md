@@ -21,6 +21,9 @@ Pass one optional release argument only when the user requested a specific Grok 
 ./.codex/skills/update-grok/scripts/update-grok-pr.sh 0.2.82
 ```
 
+Without a release argument, the updater tracks the package's NPM `alpha`
+dist-tag, where new Grok Build releases are published.
+
 The runner enforces the required behavior:
 
 - Fail immediately if the current worktree has uncommitted, staged, or untracked files.
