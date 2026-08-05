@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dockerfile="${DOCKERFILE:-${repo_root}/dev.Dockerfile}"
 grok_npm_package="${GROK_NPM_PACKAGE:-@xai-official/grok}"
+grok_npm_tag="${GROK_NPM_TAG:-alpha}"
 grok_cli_base_url="${GROK_CLI_BASE_URL:-https://x.ai/cli}"
 requested_version="${1:-latest}"
 cleanup_tmpdir=""
@@ -20,8 +21,9 @@ Examples:
 
 Environment:
   DOCKERFILE         Path to the Dockerfile to update. Defaults to dev.Dockerfile.
-  GROK_NPM_PACKAGE  NPM package to query for latest. Defaults to @xai-official/grok.
-  GROK_CLI_BASE_URL Base URL for raw Grok CLI binaries. Defaults to https://x.ai/cli.
+  GROK_NPM_PACKAGE   NPM package to query for latest. Defaults to @xai-official/grok.
+  GROK_NPM_TAG       NPM dist-tag to query for latest. Defaults to alpha.
+  GROK_CLI_BASE_URL  Base URL for raw Grok CLI binaries. Defaults to https://x.ai/cli.
 EOF
 }
 
@@ -55,7 +57,7 @@ latest_release_version() {
 
     package_path="${grok_npm_package//@/%40}"
     package_path="${package_path//\//%2f}"
-    metadata="$(curl -fsSL --retry 3 --retry-delay 2 "https://registry.npmjs.org/${package_path}/latest")"
+    metadata="$(curl -fsSL --retry 3 --retry-delay 2 "https://registry.npmjs.org/${package_path}/${grok_npm_tag}")"
 
     if command -v jq >/dev/null 2>&1; then
         version="$(printf '%s' "$metadata" | jq -r '.version // empty')"
@@ -66,7 +68,7 @@ latest_release_version() {
         )"
     fi
 
-    [[ -n "$version" && "$version" != "null" ]] || die "could not resolve latest Grok release version"
+    [[ -n "$version" && "$version" != "null" ]] || die "could not resolve latest Grok release version from npm dist-tag ${grok_npm_tag}"
     validate_version "$version"
     printf '%s\n' "$version"
 }
