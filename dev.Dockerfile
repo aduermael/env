@@ -437,9 +437,9 @@ RUN set -eux; \
     rm -rf /tmp/codex /tmp/codex.tar.gz; \
     codex --version
 
-ARG CURSOR_CLI_VERSION=2026.07.23-e383d2b
-ARG CURSOR_CLI_SHA256_AMD64=702ad595213bee5df0268be9f80a19f29fcceaa2a42fc55e39f2b5199051f0c4
-ARG CURSOR_CLI_SHA256_ARM64=f40b99647cb24e0da885e97620a2048034f1fe8961910d573d827d77c4d26dcb
+ARG CURSOR_CLI_VERSION=2026.08.04-aaa8809
+ARG CURSOR_CLI_SHA256_AMD64=e282068dcb5cdd668b8ce2e3456c58be13bb64a834e1ad49f8534b5cd7aa2fe5
+ARG CURSOR_CLI_SHA256_ARM64=d5196289292a660b59807ac508c9ac36ec1e1a1a7e4697af3ef6824fdea984ee
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
