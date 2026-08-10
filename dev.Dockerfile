@@ -420,11 +420,19 @@ RUN set -eux; \
 ARG CODEX_VERSION=rust-v0.147.0
 ARG CODEX_SHA256_AMD64=0246e2e773834e07f0fb5249ed6ebad12e4591e608f8c7bb97dd6a9690544c36
 ARG CODEX_SHA256_ARM64=eb677c80f666b1ab8b4b1d083b66e8d614b1281d960bb6f9fd8ca98f58b38b90
+ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=0146adfaac8363ec9fcdb5895f7624db5b2e8617a283887938b7fb97a1dd4356
+ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=dfd4ff98ea4db30ed078af9c31b6f86e3da4836d0573aa87e225e5a5b54d3c7c
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
-        amd64|x86_64) codex_target="x86_64-unknown-linux-musl"; codex_sha256="${CODEX_SHA256_AMD64}" ;; \
-        arm64|aarch64) codex_target="aarch64-unknown-linux-musl"; codex_sha256="${CODEX_SHA256_ARM64}" ;; \
+        amd64|x86_64) \
+            codex_target="x86_64-unknown-linux-musl"; \
+            codex_sha256="${CODEX_SHA256_AMD64}"; \
+            codex_code_mode_host_sha256="${CODEX_CODE_MODE_HOST_SHA256_AMD64}" ;; \
+        arm64|aarch64) \
+            codex_target="aarch64-unknown-linux-musl"; \
+            codex_sha256="${CODEX_SHA256_ARM64}"; \
+            codex_code_mode_host_sha256="${CODEX_CODE_MODE_HOST_SHA256_ARM64}" ;; \
         *) echo "Unsupported image architecture for Codex: ${image_arch}" >&2; exit 1 ;; \
     esac; \
     codex_asset="codex-${codex_target}.tar.gz"; \
@@ -435,7 +443,16 @@ RUN set -eux; \
     tar -xzf /tmp/codex.tar.gz -C /tmp/codex; \
     install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/bin/codex; \
     rm -rf /tmp/codex /tmp/codex.tar.gz; \
-    codex --version
+    host_asset="codex-code-mode-host-${codex_target}.tar.gz"; \
+    host_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${host_asset}"; \
+    curl -fsSL "${host_url}" -o /tmp/codex-code-mode-host.tar.gz; \
+    echo "${codex_code_mode_host_sha256}  /tmp/codex-code-mode-host.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/codex-code-mode-host; \
+    tar -xzf /tmp/codex-code-mode-host.tar.gz -C /tmp/codex-code-mode-host; \
+    install -m 0755 "/tmp/codex-code-mode-host/codex-code-mode-host-${codex_target}" /usr/local/bin/codex-code-mode-host; \
+    rm -rf /tmp/codex-code-mode-host /tmp/codex-code-mode-host.tar.gz; \
+    codex --version; \
+    test -x /usr/local/bin/codex-code-mode-host
 
 ARG CURSOR_CLI_VERSION=2026.08.04-aaa8809
 ARG CURSOR_CLI_SHA256_AMD64=e282068dcb5cdd668b8ce2e3456c58be13bb64a834e1ad49f8534b5cd7aa2fe5
