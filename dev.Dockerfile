@@ -1,35 +1,35 @@
 # syntax=docker/dockerfile:1.7
 FROM debian:bookworm@sha256:ed4fcc40bb1162b6d2d32e7bec15044d13963779abbe63f67f1cd62b06220519
 
-ARG GO_VERSION=1.26.6
-ARG GO_SHA256_AMD64=708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
-ARG GO_SHA256_ARM64=d0507e9e9d7fe012aae570108cbd76c15de879e17130ab8cb90d4d7445cb1f2e
-ARG GIT_VERSION=2.54.0
-ARG GIT_SHA256=f689162364c10de79ef89aa8dbf48731eb057e34edbbd20aca510ce0154681a3
+ARG GO_VERSION=1.27.0
+ARG GO_SHA256_AMD64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
+ARG GO_SHA256_ARM64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
+ARG GIT_VERSION=2.55.0
+ARG GIT_SHA256=457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357
 ARG GIT_SIGNING_KEY=96E07AF25771955980DAD10020D04E5A713660A7
 ARG GIT_SIGNING_KEY_TAG=dd20f6ea53bf6828baba3e2f279bf633eaae6815
-ARG NODE_VERSION=24.15.0
-ARG NODE_SHA256_AMD64=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
-ARG NODE_SHA256_ARM64=f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0
-ARG PNPM_VERSION=11.2.2
+ARG NODE_VERSION=24.19.0
+ARG NODE_SHA256_AMD64=14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
+ARG NODE_SHA256_ARM64=01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc
+ARG PNPM_VERSION=11.22.0
 ARG BAZELISK_VERSION=1.29.0
 ARG BAZELISK_SHA256_AMD64=5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992
 ARG BAZELISK_SHA256_ARM64=e20e8b0f4f240091b7a55bf17b9398bd4f40ee70ae0208dff95dd4c445fb4010
 ARG BAZEL_VERSION=9.2.0
 ARG BAZEL_SHA256_AMD64=7668a95db1250f12c40407251e4e203b4ec8bf39bc495d2f485b2d8c99048694
 ARG BAZEL_SHA256_ARM64=049dd21f40ad979db11c3ee68c96a42ce75f1185e69ac61ab20de1501427a410
-ARG RUST_VERSION=1.95.0
+ARG RUST_VERSION=1.98.0
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256_AMD64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
 ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
-ARG SWIFT_VERSION=6.3.2
+ARG SWIFT_VERSION=6.3.3
 ARG SWIFT_RELEASE_SIGNING_KEY=52BB7E3DE28A71BE22EC05FFEF80A866B47A981F
 ARG RIPGREP_VERSION=13.0.0-4+b2
 ARG VIM_VERSION=2:9.0.1378-2+deb12u2
-ARG DOCKER_CLI_VERSION=5:29.5.2-1~debian.12~bookworm
-ARG DOCKER_COMPOSE_PLUGIN_VERSION=5.1.4-1~debian.12~bookworm
-ARG LUAU_VERSION=0.721
-ARG LUAU_SHA256=b36924a114a76b4a48f02bcfbd14dfd0bb1c5b3a2f4bf246f254db50c031c061
+ARG DOCKER_CLI_VERSION=5:29.7.2-1~debian.12~bookworm
+ARG DOCKER_COMPOSE_PLUGIN_VERSION=5.5.0-1~debian.12~bookworm
+ARG LUAU_VERSION=0.734
+ARG LUAU_SHA256=cb55a891226d8c70284e22eb9281cc2b4496c709a4050f52aaa18a355fe7b1a3
 ARG HOMEBREW_INSTALL_COMMIT=d2b324899b9210d534475560acecbc77bc47bc17
 ARG HOMEBREW_INSTALL_SHA256=f3e91784ffeda32bc397de7acc1154724cc47522a459c9ac656cca176eeba457
 ARG PG_MAJOR=15
@@ -145,8 +145,8 @@ RUN set -eux; \
     xz -cd /tmp/git.tar.xz | gpg --batch --verify /tmp/git.tar.sign -; \
     mkdir -p /tmp/git-src; \
     tar -xJf /tmp/git.tar.xz -C /tmp/git-src --strip-components=1; \
-    make -C /tmp/git-src -j"$(nproc)" prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease USE_LIBPCRE2=YesPlease all; \
-    make -C /tmp/git-src prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease USE_LIBPCRE2=YesPlease install; \
+    make -C /tmp/git-src -j"$(nproc)" prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_RUST=YesPlease USE_LIBPCRE2=YesPlease all; \
+    make -C /tmp/git-src prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_RUST=YesPlease USE_LIBPCRE2=YesPlease install; \
     rm -rf "${GNUPGHOME}" /tmp/git-key /tmp/git-signing-key.asc /tmp/git-src /tmp/git.tar.sign /tmp/git.tar.xz; \
     hash -r; \
     test "$(command -v git)" = "/usr/local/bin/git"; \
@@ -307,9 +307,9 @@ RUN groupadd --system linuxbrew \
     && chmod -R g+rwX /home/linuxbrew/.linuxbrew \
     && find /home/linuxbrew/.linuxbrew -type d -exec chmod g+s {} +
 
-ARG GITHUB_CLI_VERSION=2.93.0
-ARG GITHUB_CLI_SHA256_AMD64=02d1290eba130e0b896f3709ffff22e1c75a51475ddb70476a85abc6b5807af0
-ARG GITHUB_CLI_SHA256_ARM64=c55feb33684abba57e9909737340d5b39282257c0363e1edde6785ac4a413be7
+ARG GITHUB_CLI_VERSION=2.98.0
+ARG GITHUB_CLI_SHA256_AMD64=3b8ac6b30336802fc1a858d7c084e11cdf24ac1a761ca90b68022d7d729208de
+ARG GITHUB_CLI_SHA256_ARM64=cf689084f3a3618f7eae4a2420d335d74626d65f5e594b9828d125d69f800d86
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
@@ -326,9 +326,9 @@ RUN set -eux; \
     rm -rf /tmp/gh "/tmp/${gh_file}"; \
     gh --version
 
-ARG UV_VERSION=0.11.17
-ARG UV_SHA256_AMD64=0017ccecaeb4d431d7f93b583ebff0c5c38e00eb734fcf13d05f72ca419125fe
-ARG UV_SHA256_ARM64=de008880a903ac2c5654647dc19a75c0d6652313c977a2bc5ce05e1e3a93429e
+ARG UV_VERSION=0.12.5
+ARG UV_SHA256_AMD64=68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2
+ARG UV_SHA256_ARM64=9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
@@ -347,7 +347,7 @@ RUN set -eux; \
     uv --version; \
     uvx --version
 
-ARG MODAL_CLI_VERSION=1.4.3
+ARG MODAL_CLI_VERSION=1.5.4
 RUN set -eux; \
     UV_TOOL_DIR=/usr/local/share/uv/tools \
     UV_TOOL_BIN_DIR=/usr/local/bin \
@@ -384,12 +384,12 @@ RUN set -eux; \
 
 # Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
 # layers. Version bumps here should only rebuild these layers and cheap final setup.
-ARG GEMINI_CLI_VERSION=0.42.0
+ARG GEMINI_CLI_VERSION=0.56.0
 RUN set -eux; \
     pnpm add -g "@google/gemini-cli@${GEMINI_CLI_VERSION}"; \
     gemini --version
 
-ARG CLAUDE_CODE_VERSION=2.1.146
+ARG CLAUDE_CODE_VERSION=2.1.238
 RUN set -eux; \
     pnpm add -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
     claude_pkg="$(pnpm list -g --depth -1 --json @anthropic-ai/claude-code | jq -r '.[0].dependencies["@anthropic-ai/claude-code"].path')"; \
@@ -417,11 +417,11 @@ RUN set -eux; \
     rm /tmp/grok; \
     grok --version
 
-ARG CODEX_VERSION=rust-v0.147.0
-ARG CODEX_SHA256_AMD64=0246e2e773834e07f0fb5249ed6ebad12e4591e608f8c7bb97dd6a9690544c36
-ARG CODEX_SHA256_ARM64=eb677c80f666b1ab8b4b1d083b66e8d614b1281d960bb6f9fd8ca98f58b38b90
-ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=0146adfaac8363ec9fcdb5895f7624db5b2e8617a283887938b7fb97a1dd4356
-ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=dfd4ff98ea4db30ed078af9c31b6f86e3da4836d0573aa87e225e5a5b54d3c7c
+ARG CODEX_VERSION=rust-v0.149.0
+ARG CODEX_SHA256_AMD64=7368b2055ed02157fea2695bb9f5af3ee7b0e40c5a3bebc81dfc596704244cfd
+ARG CODEX_SHA256_ARM64=1cc3eb4c2fbab048c8afae0bebb1e54745f88d91e5249a448765d34a2a2ba9bb
+ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=3600a45ac2b09fe3c995f4f49860131fea388b46c409c82a0266fc4d0342a04c
+ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=abf4a9a308d2c42e6fbb04a77704ac509c82cea5aa079848365be3fb65474b22
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
