@@ -280,7 +280,7 @@ containers without forcing the user to re-authenticate tools.
 
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
-Git 2.54.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Modal CLI, `ping`, jq,
+Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Modal CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
 bash, build tools, common dev headers, and the Docker CLI with the Compose
@@ -305,7 +305,7 @@ sudo pg_ctlcluster 15 main start
 ## Git Worktrees
 
 If you use Git worktrees from both the host and this container, use Git 2.48.0
-or newer everywhere that will touch the repository. This image builds Git 2.54.0.
+or newer everywhere that will touch the repository. This image builds Git 2.55.0.
 
 Enable relative worktree links before creating worktrees:
 
