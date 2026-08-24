@@ -476,6 +476,35 @@ RUN set -eux; \
     test "$(agent --version)" = "${CURSOR_CLI_VERSION}"; \
     test "$(cursor-agent --version)" = "${CURSOR_CLI_VERSION}"
 
+# Google Cloud CLI is pinned to a concrete rapid-channel release. Keep this
+# layer after language runtimes, Homebrew, and assistant CLIs so version bumps
+# only rebuild this install and the cheap final setup.
+ARG GCLOUD_CLI_VERSION=581.0.0
+ARG GCLOUD_CLI_SHA256_AMD64=deffdbe82ca6e3d19ffb291d063a651488e04e1b33799b5a238e4b5c6784e3c6
+ARG GCLOUD_CLI_SHA256_ARM64=22cfc09888525c6daadb8764388ce14e6c26baf80ab07938eacb08c2b4ae64c9
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) gcloud_arch="x86_64"; gcloud_sha256="${GCLOUD_CLI_SHA256_AMD64}" ;; \
+        arm64|aarch64) gcloud_arch="arm"; gcloud_sha256="${GCLOUD_CLI_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for gcloud CLI: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    gcloud_file="google-cloud-cli-${GCLOUD_CLI_VERSION}-linux-${gcloud_arch}.tar.gz"; \
+    curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${gcloud_file}" -o "/tmp/${gcloud_file}"; \
+    echo "${gcloud_sha256}  /tmp/${gcloud_file}" | sha256sum -c -; \
+    tar -xzf "/tmp/${gcloud_file}" -C /usr/local --no-same-owner; \
+    rm "/tmp/${gcloud_file}"; \
+    test -x /usr/local/google-cloud-sdk/bin/gcloud; \
+    printf 'export PATH="/usr/local/google-cloud-sdk/bin:${PATH}"\n' > /etc/profile.d/google-cloud-cli.sh; \
+    chmod 0644 /etc/profile.d/google-cloud-cli.sh; \
+    export PATH="/usr/local/google-cloud-sdk/bin:${PATH}"; \
+    hash -r; \
+    test "$(command -v gcloud)" = "/usr/local/google-cloud-sdk/bin/gcloud"; \
+    gcloud_ver_out="$(gcloud version 2>&1)"; \
+    printf '%s\n' "${gcloud_ver_out}"; \
+    printf '%s\n' "${gcloud_ver_out}" | grep -F "Google Cloud SDK ${GCLOUD_CLI_VERSION}"
+ENV PATH="/usr/local/google-cloud-sdk/bin:${PATH}"
+
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
     && install -d -m 0755 /home/dev \
