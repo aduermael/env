@@ -400,9 +400,9 @@ RUN set -eux; \
     chmod -R g+rwX,a+rX "${COREPACK_HOME}" "${PNPM_HOME}"; \
     find "${COREPACK_HOME}" "${PNPM_HOME}" -type d -exec chmod g+s {} +
 
-ARG GROK_CLI_VERSION=1.0.16
-ARG GROK_CLI_SHA256_AMD64=12058498506e52db50815a90fd37dd44b9d0e1e21d508d1124879dd1144f971f
-ARG GROK_CLI_SHA256_ARM64=a62ff21c52a98a91aa6a07d5eee5d234c1a12ba8147182ff29bfdd5f6bdefd14
+ARG GROK_CLI_VERSION=1.0.17
+ARG GROK_CLI_SHA256_AMD64=82595e26cab8f5bab470415e69a6b3d58f99b71cbcc831440b416212e3c14568
+ARG GROK_CLI_SHA256_ARM64=cbf79edfbfc1f4da642b81a260fccc4057ab607b6af8ef047d82324c46b4d431
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
