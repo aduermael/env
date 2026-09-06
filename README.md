@@ -98,6 +98,23 @@ To pin a specific release instead:
 scripts/update-cursor.sh 2026.07.16-899851b
 ```
 
+### Update Google Cloud CLI in the dev image
+
+Google Cloud CLI is pinned in `dev.Dockerfile` with checksums for both Linux
+image architectures. The pin is a versioned rapid-channel SDK archive (core CLI
+plus default bundled components). To update it to the latest rapid-channel
+release:
+
+```sh
+scripts/update-gcloud-cli.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-gcloud-cli.sh 581.0.0
+```
+
 ## CLI Reference
 
 ```sh
