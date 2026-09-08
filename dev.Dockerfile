@@ -99,6 +99,7 @@ RUN apt-get update \
         python3-venv \
         "ripgrep=${RIPGREP_VERSION}" \
         sudo \
+        time \
         tree \
         tzdata \
         unzip \
@@ -126,6 +127,7 @@ RUN apt-get update \
         webkitgtk-6.0 \
     && rg --version \
     && ssh -V \
+    && /usr/bin/time --version \
     && weasyprint --version \
     && vi --version \
     && rm -rf /var/lib/apt/lists/*
@@ -417,11 +419,11 @@ RUN set -eux; \
     rm /tmp/grok; \
     grok --version
 
-ARG CODEX_VERSION=rust-v0.149.0
-ARG CODEX_SHA256_AMD64=7368b2055ed02157fea2695bb9f5af3ee7b0e40c5a3bebc81dfc596704244cfd
-ARG CODEX_SHA256_ARM64=1cc3eb4c2fbab048c8afae0bebb1e54745f88d91e5249a448765d34a2a2ba9bb
-ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=3600a45ac2b09fe3c995f4f49860131fea388b46c409c82a0266fc4d0342a04c
-ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=abf4a9a308d2c42e6fbb04a77704ac509c82cea5aa079848365be3fb65474b22
+ARG CODEX_VERSION=rust-v0.153.4
+ARG CODEX_SHA256_AMD64=f479424eca092484dc40d87ae28c44f4cc40234a60045d6131e493800d814a30
+ARG CODEX_SHA256_ARM64=5cda6182bd94c3a30f2eb63a495489ebf7f691fddb14d70f48c6c1a5071b6cde
+ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=f95830a869590957664bbfc67bccb08773806b693670baf15908176f89b4cd31
+ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=d8047b8d33370d6090e729d27eb76de60a2686baa1c143c138c9b05dc70d813b
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
@@ -454,9 +456,9 @@ RUN set -eux; \
     codex --version; \
     test -x /usr/local/bin/codex-code-mode-host
 
-ARG CURSOR_CLI_VERSION=2026.08.11-e8db854
-ARG CURSOR_CLI_SHA256_AMD64=bfff4bf6f4e9dd30c1d0ef0a70b6077b074015dd2948e4c50685d53afdcfce5a
-ARG CURSOR_CLI_SHA256_ARM64=ea13f92e295f523a99ce8d8f57d6894d21e5d1e2d030ffad718ccd5955ca2eed
+ARG CURSOR_CLI_VERSION=2026.09.02-c22c1a3
+ARG CURSOR_CLI_SHA256_AMD64=b73b59854762535c0fc20d7ccc51c3b5a356a851491088d60a362be48750f53c
+ARG CURSOR_CLI_SHA256_ARM64=fb7bc635be6172ebcf68f907fd9217e3614da51916455c6d7fdb66690997884c
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
