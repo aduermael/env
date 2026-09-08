@@ -299,10 +299,17 @@ The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
 Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Google Cloud CLI (`gcloud`),
 Modal CLI, `ping`, jq,
-ripgrep (`rg`), `tree`, `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
+ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
 bash, build tools, common dev headers, and the Docker CLI with the Compose
 plugin.
+
+GNU `time` is `/usr/bin/time` so it does not replace the shell builtin. To
+report wall time, CPU, and peak memory for a command:
+
+```sh
+/usr/bin/time -v command
+```
 
 Codex is configured to run without its own sandbox inside this image because the
 container is the isolation boundary. Do not mount sensitive host paths into
