@@ -479,9 +479,9 @@ RUN set -eux; \
 # Google Cloud CLI is pinned to a concrete rapid-channel release. Keep this
 # layer after language runtimes, Homebrew, and assistant CLIs so version bumps
 # only rebuild this install and the cheap final setup.
-ARG GCLOUD_CLI_VERSION=581.0.0
-ARG GCLOUD_CLI_SHA256_AMD64=deffdbe82ca6e3d19ffb291d063a651488e04e1b33799b5a238e4b5c6784e3c6
-ARG GCLOUD_CLI_SHA256_ARM64=22cfc09888525c6daadb8764388ce14e6c26baf80ab07938eacb08c2b4ae64c9
+ARG GCLOUD_CLI_VERSION=583.0.0
+ARG GCLOUD_CLI_SHA256_AMD64=84c5e4798836bda13aa82c3e84fa1acd0c4e4ca5318f7141052e3a5a26a7cc97
+ARG GCLOUD_CLI_SHA256_ARM64=8ce6287e01e54b53d2e9618d124b62ac85efe5a093904ae027b17f2057030662
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
