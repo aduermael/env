@@ -298,7 +298,7 @@ containers without forcing the user to re-authenticate tools.
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
 Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Google Cloud CLI (`gcloud`),
-Modal CLI, `ping`, jq,
+Modal CLI, Blender 5.2.1 CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
 bash, build tools, common dev headers, and the Docker CLI with the Compose
@@ -326,6 +326,17 @@ cluster inside the container with:
 ```sh
 sudo pg_ctlcluster 15 main start
 ```
+
+The image includes the official Blender 5.2.1 Linux x86_64 build as `blender`.
+Use background mode for headless CLI work:
+
+```sh
+blender -b --python-expr "import bpy; print(bpy.app.version_string)"
+blender -b scene.blend --python script.py
+```
+
+Official Blender Linux builds are x86_64-only, so this install is skipped on
+arm64 images.
 
 ## Git Worktrees
 
