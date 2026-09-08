@@ -384,23 +384,30 @@ RUN set -eux; \
     chmod -R g+rwX,a+rX "${BAZELISK_HOME}"; \
     find "${BAZELISK_HOME}" -type d -exec chmod g+s {} +
 
-# Official Blender Linux tarball is large and slow-moving. Keep it with the
-# expensive runtimes so assistant CLI and gcloud bumps do not rebuild it.
-# Upstream publishes linux-x64 only; arm64 images skip this install.
+# Blender is large and slow-moving. Keep it with the expensive runtimes so
+# assistant CLI and gcloud bumps do not rebuild it. Upstream publishes
+# linux-x64 only; arm64 uses an unofficial portable Rocky Linux 8 build.
 ARG BLENDER_VERSION=5.2.1
 ARG BLENDER_SHA256_AMD64=a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9
+ARG BLENDER_ARM64_VERSION=5.1.0
+ARG BLENDER_ARM64_ASSET=blender-5.1.0-git20260325.ae6d847d66fa-aarch64.tar.gz
+ARG BLENDER_SHA256_ARM64=a4927219950566af13572e72f31b5bcb8baf87190ee86a26e2572ce7fd059793
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
-        amd64|x86_64) blender_arch="x64"; blender_sha256="${BLENDER_SHA256_AMD64}" ;; \
+        amd64|x86_64) \
+            blender_version="${BLENDER_VERSION}"; \
+            blender_sha256="${BLENDER_SHA256_AMD64}"; \
+            blender_major_minor="${BLENDER_VERSION%.*}"; \
+            blender_file="blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
+            blender_url="https://download.blender.org/release/Blender${blender_major_minor}/${blender_file}" ;; \
         arm64|aarch64) \
-            echo "Official Blender Linux builds are x86_64-only; skipping on ${image_arch}" >&2; \
-            exit 0 ;; \
+            blender_version="${BLENDER_ARM64_VERSION}"; \
+            blender_sha256="${BLENDER_SHA256_ARM64}"; \
+            blender_file="${BLENDER_ARM64_ASSET}"; \
+            blender_url="https://github.com/lfdevs/blender-linux-arm64/releases/download/v${BLENDER_ARM64_VERSION}/${blender_file}" ;; \
         *) echo "Unsupported image architecture for Blender: ${image_arch}" >&2; exit 1 ;; \
     esac; \
-    blender_major_minor="${BLENDER_VERSION%.*}"; \
-    blender_file="blender-${BLENDER_VERSION}-linux-${blender_arch}.tar.xz"; \
-    blender_url="https://download.blender.org/release/Blender${blender_major_minor}/${blender_file}"; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libegl1 \
@@ -419,7 +426,7 @@ RUN set -eux; \
     curl -fsSL "${blender_url}" -o "/tmp/${blender_file}"; \
     echo "${blender_sha256}  /tmp/${blender_file}" | sha256sum -c -; \
     install -d -m 0755 /usr/local/blender; \
-    tar --no-same-owner --strip-components=1 -xJf "/tmp/${blender_file}" -C /usr/local/blender; \
+    tar --no-same-owner --strip-components=1 -xf "/tmp/${blender_file}" -C /usr/local/blender; \
     rm "/tmp/${blender_file}"; \
     test -x /usr/local/blender/blender; \
     ln -s /usr/local/blender/blender /usr/local/bin/blender; \
@@ -427,7 +434,7 @@ RUN set -eux; \
     test "$(command -v blender)" = "/usr/local/bin/blender"; \
     blender_ver_out="$(blender --factory-startup --version)"; \
     printf '%s\n' "${blender_ver_out}"; \
-    printf '%s\n' "${blender_ver_out}" | grep -F "Blender ${BLENDER_VERSION}"; \
+    printf '%s\n' "${blender_ver_out}" | grep -F "Blender ${blender_version}"; \
     blender --factory-startup -b --python-exit-code 1 --python-expr "import bpy; print(bpy.app.version_string)"
 
 # Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
