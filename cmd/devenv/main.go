@@ -30,6 +30,8 @@ const (
 
 	zshrcStartMarker = "# >>> devenv >>>"
 	zshrcEndMarker   = "# <<< devenv <<<"
+
+	codexSqliteHome = "/var/lib/codex-sqlite"
 )
 
 type config struct {
@@ -431,6 +433,9 @@ func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		if err := os.RemoveAll(cfg.Root); err != nil {
 			return fmt.Errorf("delete devenv state directory: %w", err)
 		}
+		if err := removeCodexSqliteVolume(ctx, cfg); err != nil {
+			return err
+		}
 	} else {
 		status(cfg, stdout, "keep: %s", cfg.Root)
 	}
@@ -812,6 +817,20 @@ func proxyNetworkName(cfg config) string {
 	return cfg.ProxyContainer + "-net"
 }
 
+func codexSqliteVolumeName(cfg config) string {
+	return cfg.ProxyContainer + "-codex-sqlite"
+}
+
+func removeCodexSqliteVolume(ctx context.Context, cfg config) error {
+	if _, err := dockerOutput(ctx, "volume", "rm", codexSqliteVolumeName(cfg)); err != nil {
+		if isDockerNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("remove Codex SQLite volume: %w", err)
+	}
+	return nil
+}
+
 func waitForProxy(ctx context.Context, socketPath, containerName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -1048,13 +1067,23 @@ func devDockerRunArgs(cfg config, command []string) ([]string, error) {
 		"--mount", "type=bind,source=" + cfg.Root + ",target=/devenv,readonly",
 		"--mount", "type=bind,source=" + filepath.Join(cfg.Root, "home") + ",target=/home/dev",
 		"--mount", "type=bind,source=" + filepath.Join(cfg.Root, "ssh") + ",target=/home/dev/.ssh",
+		"--mount", "type=volume,source=" + codexSqliteVolumeName(cfg) + ",target=" + codexSqliteHome,
+		"-e", "CODEX_SQLITE_HOME=" + codexSqliteHome,
 	}
 
 	if terminalFile(os.Stdin) && terminalFile(os.Stdout) {
 		args = append(args, "-it")
 	}
 
-	for _, name := range []string{
+	args = append(args, forwardedTerminalEnv()...)
+
+	args = append(args, cfg.Image)
+	args = append(args, command...)
+	return args, nil
+}
+
+func forwardedTerminalEnv() []string {
+	names := []string{
 		"TERM",
 		"COLORTERM",
 		"TERM_PROGRAM",
@@ -1064,15 +1093,14 @@ func devDockerRunArgs(cfg config, command []string) ([]string, error) {
 		"GHOSTTY_RESOURCES_DIR",
 		"VTE_VERSION",
 		"CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT",
-	} {
+	}
+	var env []string
+	for _, name := range names {
 		if value := os.Getenv(name); value != "" {
-			args = append(args, "-e", name+"="+value)
+			env = append(env, "-e", name+"="+value)
 		}
 	}
-
-	args = append(args, cfg.Image)
-	args = append(args, command...)
-	return args, nil
+	return env
 }
 
 func terminalFile(file *os.File) bool {

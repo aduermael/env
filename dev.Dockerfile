@@ -676,8 +676,29 @@ if [[ -S "${docker_socket}" ]]; then
     fi
 fi
 
+sqlite_home="${CODEX_SQLITE_HOME:-/var/lib/codex-sqlite}"
+install -d -m 0700 -o "${uid}" -g "${gid}" "${sqlite_home}"
+# Bind-mounted ~/.codex on macOS is too slow for Codex's SQLite logs.
+# Oversized logs_2.sqlite stalls TUI startup on "loading" the model.
+codex_logs="${home_dir}/.codex/logs_2.sqlite"
+codex_logs_size=0
+if [[ -f "${codex_logs}" ]]; then
+    codex_logs_size="$(stat -c '%s' "${codex_logs}" 2>/dev/null || echo 0)"
+fi
+if [[ -f "${codex_logs}-wal" ]]; then
+    codex_logs_size="$((codex_logs_size + $(stat -c '%s' "${codex_logs}-wal" 2>/dev/null || echo 0)))"
+fi
+if [[ "${codex_logs_size}" -gt 1073741824 ]]; then
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    echo "warning: Codex logs are $((codex_logs_size / 1024 / 1024))MiB; moving them aside so startup is not blocked" >&2
+    mv -f "${codex_logs}" "${codex_logs}.stale-${stamp}" 2>/dev/null || true
+    mv -f "${codex_logs}-wal" "${codex_logs}-wal.stale-${stamp}" 2>/dev/null || true
+    mv -f "${codex_logs}-shm" "${codex_logs}-shm.stale-${stamp}" 2>/dev/null || true
+fi
+
 export HOME="${home_dir}"
 export CODEX_HOME="${home_dir}/.codex"
+export CODEX_SQLITE_HOME="${sqlite_home}"
 export USER="${user_name}"
 export LOGNAME="${user_name}"
 export SHELL=/bin/bash
@@ -687,9 +708,20 @@ SCRIPT
 chmod 0755 /usr/local/bin/dev-entrypoint
 EOF
 
+# Codex 0.153 looks for the code-mode helper under libexec. SQLite state is
+# kept off the macOS home bind mount so large logs_2.sqlite files do not stall
+# TUI startup on "loading" the model.
+RUN set -eux; \
+    install -d -m 0755 /usr/local/libexec; \
+    ln -sfr /usr/local/bin/codex-code-mode-host /usr/local/libexec/codex-code-mode-host; \
+    test -x /usr/local/bin/codex-code-mode-host; \
+    test -x /usr/local/libexec/codex-code-mode-host; \
+    install -d -m 1777 /var/lib/codex-sqlite
+
 # Runtime-only defaults stay late so simple CLI-experience tweaks do not
 # invalidate the expensive tool installation layers.
 ENV PGDATA=/workspace/.postgres-data \
+    CODEX_SQLITE_HOME=/var/lib/codex-sqlite \
     TERM=xterm-256color
 
 WORKDIR /workspace

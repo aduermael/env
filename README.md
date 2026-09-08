@@ -223,7 +223,10 @@ volume. The default layout is:
 Mount contract:
 
 - `~/.devenv/home` is mounted as `/home/dev` so tool state such as `~/.codex`
-  persists across containers.
+  persists across containers. Codex SQLite (logs, memories, thread index) is
+  stored on a Linux Docker volume at `/var/lib/codex-sqlite` instead of that
+  bind mount. A multi-gigabyte `logs_2.sqlite` on macOS virtiofs can stall TUI
+  startup on "loading" the model for a long time.
 - `~/.devenv` is mounted read-only at `/devenv`, and containers receive
   `GIT_CONFIG_GLOBAL=/devenv/gitconfig` so env-owned Git config is used without
   overlaying files inside the persisted home bind mount.
@@ -285,6 +288,7 @@ containers exist should succeed.
 
 - Do not delete `~/.devenv/gitconfig`.
 - Do not delete `~/.devenv/home` or tool state such as `~/.codex`.
+- Do not remove the Codex SQLite Docker volume unless `--delete-data` is passed.
 - Do not delete `~/.devenv/ssh` or its keypair.
 - Do not remove the generated zshrc block.
 - Do not remove the dev image unless a separate explicit prune command or flag
@@ -315,6 +319,17 @@ Codex is configured to run without its own sandbox inside this image because the
 container is the isolation boundary. Do not mount sensitive host paths into
 containers where Codex runs with broad autonomy. Use the safe Docker socket proxy
 if Docker CLI access is needed.
+
+`codex-code-mode-host` is installed at `/usr/local/bin/codex-code-mode-host` and
+symlinked to `/usr/local/libexec/codex-code-mode-host`, which is where Codex
+0.153 looks for it.
+
+Codex SQLite state uses `CODEX_SQLITE_HOME=/var/lib/codex-sqlite`. Leave that on
+a Linux volume, not the macOS `~/.devenv/home` bind mount. Codex writes TRACE
+payloads into `logs_2.sqlite`; on a bind mount that file can grow to many
+gigabytes and block model catalog / TUI startup. The container entrypoint moves
+`logs_2.sqlite` aside when it is larger than 1 GiB. Stale `*.stale-*` files in
+`~/.codex` can be deleted to reclaim disk.
 
 Codex enhanced keyboard reporting follows Codex's default behavior. To force the
 legacy Docker TTY behavior, set `CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1`

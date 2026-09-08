@@ -66,6 +66,8 @@ grep -Fq 'install -m 0755 "/tmp/codex-code-mode-host/codex-code-mode-host-${code
     || die "Dockerfile does not install /usr/local/bin/codex-code-mode-host"
 grep -Fq 'test -x /usr/local/bin/codex-code-mode-host' "$dockerfile" \
     || die "Dockerfile does not assert host executable after install"
+grep -Fq 'ln -sfr /usr/local/bin/codex-code-mode-host /usr/local/libexec/codex-code-mode-host' "$dockerfile" \
+    || die "Dockerfile does not symlink Codex code-mode host into /usr/local/libexec"
 
 tag="$(arg_value CODEX_VERSION)"
 host_sha_amd64="$(arg_value CODEX_CODE_MODE_HOST_SHA256_AMD64)"

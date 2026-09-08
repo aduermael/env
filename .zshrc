@@ -12,8 +12,10 @@ _dev_docker_run() {
     --rm
     -it
     -e "TERM=${TERM:-xterm-256color}"
+    -e "CODEX_SQLITE_HOME=${CODEX_SQLITE_HOME:-/var/lib/codex-sqlite}"
     -v "$PWD:/workspace"
     --mount type=volume,source=dev-volume,target=/home/dev
+    --mount type=volume,source=dev-codex-sqlite,target=/var/lib/codex-sqlite
     --mount "type=bind,source=$HOME/.gitconfig,target=/home/dev/.gitconfig,readonly"
   )
 
