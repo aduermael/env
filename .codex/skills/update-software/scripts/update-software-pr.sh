@@ -23,7 +23,7 @@ usage() {
     cat <<'EOF'
 Usage: update-software-pr.sh PACKAGE [latest|VERSION|TAG]
 
-PACKAGE is one of: grok, codex, cursor, gcloud-cli
+PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl
 
 Runs that package's ./scripts/update-*.sh from a fresh origin/main worktree.
 If dev.Dockerfile changes, creates a branch, pushes it, and opens a PR.
@@ -56,9 +56,15 @@ configure_package() {
             display_name="gcloud CLI"
             checksum_blurb="update amd64 and arm64 checksums for the new rapid-channel SDK archive"
             ;;
+        kubectl)
+            updater_rel="scripts/update-kubectl.sh"
+            version_arg="KUBECTL_VERSION"
+            display_name="kubectl"
+            checksum_blurb="update amd64 and arm64 checksums for the new Kubernetes release"
+            ;;
         *)
             usage >&2
-            die "unknown package: $1 (expected grok, codex, cursor, or gcloud-cli)"
+            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, or kubectl)"
             ;;
     esac
     package="$1"
