@@ -1,7 +1,0 @@
-interface:
-  display_name: "Update gcloud CLI"
-  short_description: "Run the gcloud CLI dev image update flow"
-  default_prompt: "Use $update-gcloud-cli to update the repo's gcloud CLI pin and open a PR."
-
-policy:
-  allow_implicit_invocation: false

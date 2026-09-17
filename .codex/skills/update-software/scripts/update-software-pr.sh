@@ -4,6 +4,11 @@ set -euo pipefail
 repo_root=""
 tmpdir=""
 worktree=""
+package=""
+updater_rel=""
+version_arg=""
+display_name=""
+checksum_blurb=""
 
 die() {
     printf 'error: %s\n' "$*" >&2
@@ -16,11 +21,47 @@ require_command() {
 
 usage() {
     cat <<'EOF'
-Usage: update-gcloud-cli-pr.sh [latest|VERSION]
+Usage: update-software-pr.sh PACKAGE [latest|VERSION|TAG]
 
-Runs ./scripts/update-gcloud-cli.sh from a fresh origin/main worktree.
+PACKAGE is one of: grok, codex, cursor, gcloud-cli
+
+Runs that package's ./scripts/update-*.sh from a fresh origin/main worktree.
 If dev.Dockerfile changes, creates a branch, pushes it, and opens a PR.
 EOF
+}
+
+configure_package() {
+    case "$1" in
+        grok)
+            updater_rel="scripts/update-grok.sh"
+            version_arg="GROK_CLI_VERSION"
+            display_name="Grok Build"
+            checksum_blurb="update amd64 and arm64 checksums for the new release"
+            ;;
+        codex)
+            updater_rel="scripts/update-codex.sh"
+            version_arg="CODEX_VERSION"
+            display_name="Codex"
+            checksum_blurb="update amd64 and arm64 checksums for the new release"
+            ;;
+        cursor)
+            updater_rel="scripts/update-cursor.sh"
+            version_arg="CURSOR_CLI_VERSION"
+            display_name="Cursor CLI"
+            checksum_blurb="update amd64 and arm64 checksums for the new release"
+            ;;
+        gcloud-cli)
+            updater_rel="scripts/update-gcloud-cli.sh"
+            version_arg="GCLOUD_CLI_VERSION"
+            display_name="gcloud CLI"
+            checksum_blurb="update amd64 and arm64 checksums for the new rapid-channel SDK archive"
+            ;;
+        *)
+            usage >&2
+            die "unknown package: $1 (expected grok, codex, cursor, or gcloud-cli)"
+            ;;
+    esac
+    package="$1"
 }
 
 dirty_status() {
@@ -55,10 +96,16 @@ main() {
         exit 0
     fi
 
-    [[ "$#" -le 1 ]] || {
+    [[ "$#" -ge 1 && "$#" -le 2 ]] || {
         usage >&2
-        die "expected at most one release argument"
+        die "expected PACKAGE and at most one release argument"
     }
+
+    configure_package "$1"
+    local release_arg=""
+    if [[ "$#" -eq 2 ]]; then
+        release_arg="$2"
+    fi
 
     require_command git
     require_command gh
@@ -66,7 +113,7 @@ main() {
     local dirty version branch base_branch body_file commit_sha pr_url
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git repository"
 
-    [[ -x "${repo_root}/scripts/update-gcloud-cli.sh" ]] || die "missing executable: ./scripts/update-gcloud-cli.sh"
+    [[ -x "${repo_root}/${updater_rel}" ]] || die "missing executable: ./${updater_rel}"
     [[ -f "${repo_root}/dev.Dockerfile" ]] || die "missing dev.Dockerfile"
 
     dirty="$(dirty_status "$repo_root")"
@@ -77,7 +124,7 @@ main() {
 
     git -C "$repo_root" fetch origin main
 
-    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/update-gcloud-cli-pr.XXXXXX")"
+    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/update-software-pr.XXXXXX")"
     worktree="${tmpdir}/worktree"
     body_file="${tmpdir}/pr-body.md"
 
@@ -93,10 +140,10 @@ main() {
 
     git -C "$repo_root" worktree add --detach "$worktree" origin/main
 
-    if [[ "$#" -eq 1 ]]; then
-        (cd "$worktree" && ./scripts/update-gcloud-cli.sh "$1")
+    if [[ -n "$release_arg" ]]; then
+        (cd "$worktree" && "./${updater_rel}" "$release_arg")
     else
-        (cd "$worktree" && ./scripts/update-gcloud-cli.sh)
+        (cd "$worktree" && "./${updater_rel}")
     fi
 
     if git -C "$worktree" diff --quiet -- dev.Dockerfile; then
@@ -109,10 +156,10 @@ main() {
         die "updater changed files other than dev.Dockerfile"
     }
 
-    version="$(sed -n 's/^ARG GCLOUD_CLI_VERSION=//p' "${worktree}/dev.Dockerfile" | head -n 1)"
-    [[ -n "$version" ]] || die "could not read GCLOUD_CLI_VERSION from dev.Dockerfile"
+    version="$(sed -n "s/^ARG ${version_arg}=//p" "${worktree}/dev.Dockerfile" | head -n 1)"
+    [[ -n "$version" ]] || die "could not read ${version_arg} from dev.Dockerfile"
 
-    base_branch="update-gcloud-cli-$(sanitize_branch_component "$version")"
+    base_branch="update-${package}-$(sanitize_branch_component "$version")"
     branch="$base_branch"
     if (cd "$worktree" && branch_exists "$branch"); then
         branch="${base_branch}-$(date -u +%Y%m%d%H%M%S)"
@@ -120,19 +167,19 @@ main() {
 
     git -C "$worktree" switch -c "$branch"
     git -C "$worktree" add dev.Dockerfile
-    git -C "$worktree" commit -m "Update gcloud CLI to ${version}"
+    git -C "$worktree" commit -m "Update ${display_name} to ${version}"
     git -C "$worktree" push -u origin "$branch"
 
     cat > "$body_file" <<EOF
 ## Summary
-- update gcloud CLI to ${version} in the dev image
-- update amd64 and arm64 checksums for the new rapid-channel SDK archive
+- update ${display_name} to ${version} in the dev image
+- ${checksum_blurb}
 
 ## Tests
-- ./scripts/update-gcloud-cli.sh${1:+ $1}
+- ./${updater_rel}${release_arg:+ ${release_arg}}
 EOF
 
-    pr_url="$(git -C "$worktree" rev-parse --show-toplevel >/dev/null && cd "$worktree" && gh pr create --base main --head "$branch" --title "Update gcloud CLI to ${version}" --body-file "$body_file")"
+    pr_url="$(git -C "$worktree" rev-parse --show-toplevel >/dev/null && cd "$worktree" && gh pr create --base main --head "$branch" --title "Update ${display_name} to ${version}" --body-file "$body_file")"
     commit_sha="$(git -C "$worktree" rev-parse --short HEAD)"
 
     printf 'branch: %s\n' "$branch"
