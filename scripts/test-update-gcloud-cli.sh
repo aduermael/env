@@ -9,7 +9,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dockerfile="${DOCKERFILE:-${repo_root}/dev.Dockerfile}"
 update_script="${repo_root}/scripts/update-gcloud-cli.sh"
-pr_runner="${repo_root}/.codex/skills/update-gcloud-cli/scripts/update-gcloud-cli-pr.sh"
+pr_runner="${repo_root}/.codex/skills/update-software/scripts/update-software-pr.sh"
 tmpdir=""
 
 die() {
@@ -48,7 +48,7 @@ require_command sed
 [[ -f "$pr_runner" ]] || die "PR runner not found: $pr_runner"
 
 bash -n "$update_script" || die "bash -n failed for update-gcloud-cli.sh"
-bash -n "$pr_runner" || die "bash -n failed for update-gcloud-cli-pr.sh"
+bash -n "$pr_runner" || die "bash -n failed for update-software-pr.sh"
 
 version="$(arg_value GCLOUD_CLI_VERSION)"
 sha_amd64="$(arg_value GCLOUD_CLI_SHA256_AMD64)"
