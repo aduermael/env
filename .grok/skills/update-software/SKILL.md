@@ -1,9 +1,10 @@
 ---
 name: update-software
 description: >
-  Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, or
-  Google Cloud CLI (gcloud) release pin in this repo. Use only when the user
-  runs /update-software or asks to run the update-software skill; it checks
+  Manual-only workflow for updating the Grok Build, Codex, Cursor CLI,
+  Google Cloud CLI (gcloud), or kubectl release pin in this repo. Use only
+  when the user runs /update-software or asks to run the update-software
+  skill; it checks
   for a clean Git worktree, runs the matching ./scripts/update-*.sh, and
   opens a GitHub PR if dev.Dockerfile changes.
 disable-model-invocation: true

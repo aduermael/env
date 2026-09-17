@@ -385,7 +385,7 @@ RUN set -eux; \
     find "${BAZELISK_HOME}" -type d -exec chmod g+s {} +
 
 # Blender is large and slow-moving. Keep it with the expensive runtimes so
-# assistant CLI and gcloud bumps do not rebuild it. Upstream publishes
+# assistant CLI, gcloud, and kubectl bumps do not rebuild it. Upstream publishes
 # linux-x64 only; arm64 uses an unofficial portable Rocky Linux 8 build.
 ARG BLENDER_VERSION=5.2.1
 ARG BLENDER_SHA256_AMD64=a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9
@@ -559,6 +559,30 @@ RUN set -eux; \
     printf '%s\n' "${gcloud_ver_out}"; \
     printf '%s\n' "${gcloud_ver_out}" | grep -F "Google Cloud SDK ${GCLOUD_CLI_VERSION}"
 ENV PATH="/usr/local/google-cloud-sdk/bin:${PATH}"
+
+# kubectl is pinned to a concrete Kubernetes release. Keep this layer after
+# gcloud so version bumps only rebuild this install and the cheap final setup.
+ARG KUBECTL_VERSION=v1.37.0
+ARG KUBECTL_SHA256_AMD64=6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
+ARG KUBECTL_SHA256_ARM64=922df28df248cc00a9e025f947704f1d1482de64ece54cfe57e61f19eaf1eef3
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) kubectl_arch="amd64"; kubectl_sha256="${KUBECTL_SHA256_AMD64}" ;; \
+        arm64|aarch64) kubectl_arch="arm64"; kubectl_sha256="${KUBECTL_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for kubectl: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    kubectl_url="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl"; \
+    curl -fsSL "${kubectl_url}" -o /tmp/kubectl; \
+    echo "${kubectl_sha256}  /tmp/kubectl" | sha256sum -c -; \
+    install -m 0755 /tmp/kubectl /usr/local/bin/kubectl; \
+    rm /tmp/kubectl; \
+    test -x /usr/local/bin/kubectl; \
+    hash -r; \
+    test "$(command -v kubectl)" = "/usr/local/bin/kubectl"; \
+    kubectl_ver_out="$(kubectl version --client=true)"; \
+    printf '%s\n' "${kubectl_ver_out}"; \
+    printf '%s\n' "${kubectl_ver_out}" | grep -F "Client Version: ${KUBECTL_VERSION}"
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
