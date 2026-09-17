@@ -385,8 +385,9 @@ RUN set -eux; \
     find "${BAZELISK_HOME}" -type d -exec chmod g+s {} +
 
 # Blender is large and slow-moving. Keep it with the expensive runtimes so
-# assistant CLI, gcloud, and kubectl bumps do not rebuild it. Upstream publishes
-# linux-x64 only; arm64 uses an unofficial portable Rocky Linux 8 build.
+# assistant CLI, gcloud, kubectl, and gke-gcloud-auth-plugin bumps do not
+# rebuild it. Upstream publishes linux-x64 only; arm64 uses an unofficial
+# portable Rocky Linux 8 build.
 ARG BLENDER_VERSION=5.2.1
 ARG BLENDER_SHA256_AMD64=a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9
 ARG BLENDER_ARM64_VERSION=5.1.0
@@ -583,6 +584,32 @@ RUN set -eux; \
     kubectl_ver_out="$(kubectl version --client=true)"; \
     printf '%s\n' "${kubectl_ver_out}"; \
     printf '%s\n' "${kubectl_ver_out}" | grep -F "Client Version: ${KUBECTL_VERSION}"
+
+# gke-gcloud-auth-plugin is pinned to a concrete Google Cloud CLI packager
+# release. Keep this layer after kubectl so version bumps only rebuild this
+# install and the cheap final setup.
+ARG GKE_GCLOUD_AUTH_PLUGIN_VERSION=585.0.0
+ARG GKE_GCLOUD_AUTH_PLUGIN_SHA256_AMD64=9769c988d4f79650d7feed589c5fdf3df83f5ba9ab455210f7f46fc4cc58b622
+ARG GKE_GCLOUD_AUTH_PLUGIN_SHA256_ARM64=089a3e2873c0dc7b99e830b2e852f33466a3cc118b7e5051dafbc53575627073
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) plugin_arch="amd64"; plugin_sha256="${GKE_GCLOUD_AUTH_PLUGIN_SHA256_AMD64}" ;; \
+        arm64|aarch64) plugin_arch="aarch64"; plugin_sha256="${GKE_GCLOUD_AUTH_PLUGIN_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for gke-gcloud-auth-plugin: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    plugin_file="google-cloud-cli-gke-gcloud-auth-plugin_${GKE_GCLOUD_AUTH_PLUGIN_VERSION}.orig_${plugin_arch}.tar.gz"; \
+    curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/for_packagers/linux/${plugin_file}" -o "/tmp/${plugin_file}"; \
+    echo "${plugin_sha256}  /tmp/${plugin_file}" | sha256sum -c -; \
+    tar -xzf "/tmp/${plugin_file}" -C /usr/local --no-same-owner; \
+    rm "/tmp/${plugin_file}"; \
+    test -x /usr/local/google-cloud-sdk/bin/gke-gcloud-auth-plugin; \
+    hash -r; \
+    test "$(command -v gke-gcloud-auth-plugin)" = "/usr/local/google-cloud-sdk/bin/gke-gcloud-auth-plugin"; \
+    plugin_ver_out="$(gke-gcloud-auth-plugin --version)"; \
+    printf '%s\n' "${plugin_ver_out}"; \
+    test -n "${plugin_ver_out}"; \
+    grep -Fq "\"version\": \"${GKE_GCLOUD_AUTH_PLUGIN_VERSION}\"" /usr/local/google-cloud-sdk/.install/gke-gcloud-auth-plugin.snapshot.json
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \

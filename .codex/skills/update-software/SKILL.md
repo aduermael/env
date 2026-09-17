@@ -1,6 +1,6 @@
 ---
 name: update-software
-description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Google Cloud CLI (gcloud), or kubectl release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
+description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Google Cloud CLI (gcloud), kubectl, or gke-gcloud-auth-plugin release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
 ---
 
 # Update software pins
@@ -14,6 +14,7 @@ Supported `PACKAGE` values:
 - `cursor` — `./scripts/update-cursor.sh`
 - `gcloud-cli` — `./scripts/update-gcloud-cli.sh`
 - `kubectl` — `./scripts/update-kubectl.sh`
+- `gke-gcloud-auth-plugin` — `./scripts/update-gke-gcloud-auth-plugin.sh`
 
 ## Workflow
 
@@ -31,6 +32,7 @@ Pass one optional release argument only when the user requested a specific versi
 ./.codex/skills/update-software/scripts/update-software-pr.sh cursor 2026.07.16-899851b
 ./.codex/skills/update-software/scripts/update-software-pr.sh gcloud-cli 581.0.0
 ./.codex/skills/update-software/scripts/update-software-pr.sh kubectl v1.37.0
+./.codex/skills/update-software/scripts/update-software-pr.sh gke-gcloud-auth-plugin 585.0.0
 ```
 
 The runner enforces the required behavior:

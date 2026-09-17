@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Fixture test for the unified update-software skill runner.
 # Drives the shipped runner against a local git fixture for grok, codex,
-# cursor, gcloud-cli, and kubectl: dirty worktree abort, matching updater dispatch,
+# cursor, gcloud-cli, kubectl, and gke-gcloud-auth-plugin: dirty worktree abort, matching updater dispatch,
 # and unchanged-Dockerfile no-update path.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pr_runner="${repo_root}/.codex/skills/update-software/scripts/update-software-pr.sh"
-packages=(grok codex cursor gcloud-cli kubectl)
+packages=(grok codex cursor gcloud-cli kubectl gke-gcloud-auth-plugin)
 tmpdir=""
 
 die() {
@@ -65,6 +65,7 @@ ARG CODEX_VERSION=0.0.0
 ARG CURSOR_CLI_VERSION=0.0.0
 ARG GCLOUD_CLI_VERSION=0.0.0
 ARG KUBECTL_VERSION=0.0.0
+ARG GKE_GCLOUD_AUTH_PLUGIN_VERSION=0.0.0
 EOF
 
 for pkg in "${packages[@]}"; do

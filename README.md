@@ -130,6 +130,22 @@ To pin a specific release instead:
 scripts/update-kubectl.sh v1.37.0
 ```
 
+### Update gke-gcloud-auth-plugin in the dev image
+
+`gke-gcloud-auth-plugin` is pinned in `dev.Dockerfile` with checksums for both
+Linux image architectures. The pin is a versioned rapid-channel Google Cloud CLI
+packager archive. To update it to the latest rapid-channel release:
+
+```sh
+scripts/update-gke-gcloud-auth-plugin.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-gke-gcloud-auth-plugin.sh 585.0.0
+```
+
 ## CLI Reference
 
 ```sh
@@ -317,7 +333,7 @@ containers without forcing the user to re-authenticate tools.
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
 Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Google Cloud CLI (`gcloud`),
-kubectl, Modal CLI, Blender CLI, `ping`, jq,
+kubectl, `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
 bash, build tools, common dev headers, and the Docker CLI with the Compose
