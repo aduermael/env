@@ -90,6 +90,8 @@ grep -Fq 'gcloud_file="google-cloud-cli-${GCLOUD_CLI_VERSION}-linux-${gcloud_arc
     || die "update-gcloud-cli.sh rewrite dropped gcloud archive filename line"
 grep -Fq 'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${gcloud_file}' "$fixture_df" \
     || die "update-gcloud-cli.sh rewrite dropped rapid-channel download URL"
+grep -Fq 'gcloud components install --quiet gke-gcloud-auth-plugin' "$fixture_df" \
+    || die "update-gcloud-cli.sh rewrite dropped gke-gcloud-auth-plugin component install"
 
 printf 'ok: update-gcloud-cli.sh restored gcloud SHA ARGs for %s\n' "$version"
 printf 'ALL CHECKS PASSED\n'

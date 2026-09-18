@@ -102,8 +102,9 @@ scripts/update-cursor.sh 2026.07.16-899851b
 
 Google Cloud CLI is pinned in `dev.Dockerfile` with checksums for both Linux
 image architectures. The pin is a versioned rapid-channel SDK archive (core CLI
-plus default bundled components). To update it to the latest rapid-channel
-release:
+plus default bundled components). The image then installs
+`gke-gcloud-auth-plugin` with `gcloud components install` so kubectl can
+authenticate to GKE. To update gcloud to the latest rapid-channel release:
 
 ```sh
 scripts/update-gcloud-cli.sh
@@ -128,22 +129,6 @@ To pin a specific release instead:
 
 ```sh
 scripts/update-kubectl.sh v1.37.0
-```
-
-### Update gke-gcloud-auth-plugin in the dev image
-
-`gke-gcloud-auth-plugin` is pinned in `dev.Dockerfile` with checksums for both
-Linux image architectures. The pin is a versioned rapid-channel Google Cloud CLI
-packager archive. To update it to the latest rapid-channel release:
-
-```sh
-scripts/update-gke-gcloud-auth-plugin.sh
-```
-
-To pin a specific release instead:
-
-```sh
-scripts/update-gke-gcloud-auth-plugin.sh 585.0.0
 ```
 
 ## CLI Reference

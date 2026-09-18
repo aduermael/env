@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Structural + network smoke test for the Google Cloud CLI pin.
 # Reads the shipped dev.Dockerfile (not a copy) and asserts a concrete
-# google-cloud-cli release is installed and that the image build itself
-# runs `gcloud version`.
+# google-cloud-cli release is installed, that the image build itself
+# runs `gcloud version`, and that gke-gcloud-auth-plugin is installed
+# with `gcloud components install`.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -66,6 +67,12 @@ grep -Eq 'gcloud version' "$dockerfile" \
     || die "Dockerfile does not invoke gcloud version during the image build"
 grep -Fq 'grep -F "Google Cloud SDK ${GCLOUD_CLI_VERSION}"' "$dockerfile" \
     || die "Dockerfile does not check gcloud version against the pinned release"
+grep -Fq 'gcloud components install --quiet gke-gcloud-auth-plugin' "$dockerfile" \
+    || die "Dockerfile does not install gke-gcloud-auth-plugin with gcloud components install"
+grep -Fq 'test -x /usr/local/google-cloud-sdk/bin/gke-gcloud-auth-plugin' "$dockerfile" \
+    || die "Dockerfile does not assert /usr/local/google-cloud-sdk/bin/gke-gcloud-auth-plugin is executable"
+grep -Eq 'gke-gcloud-auth-plugin --version' "$dockerfile" \
+    || die "Dockerfile does not invoke gke-gcloud-auth-plugin --version during the image build"
 
 # Live checksums for the pinned versioned archives (the files the Dockerfile fetches).
 verify_archive() {
