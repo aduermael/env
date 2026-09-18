@@ -533,7 +533,9 @@ RUN set -eux; \
 
 # Google Cloud CLI is pinned to a concrete rapid-channel release. Keep this
 # layer after language runtimes, Homebrew, and assistant CLIs so version bumps
-# only rebuild this install and the cheap final setup.
+# only rebuild this install and the cheap final setup. gke-gcloud-auth-plugin
+# is a gcloud component, so it is installed here with `gcloud components
+# install` rather than as a separately pinned CLI.
 ARG GCLOUD_CLI_VERSION=585.0.0
 ARG GCLOUD_CLI_SHA256_AMD64=7b97198ef306f5400b67f057f7415a46bd9a34367eeabd87516ee3f74bc76a36
 ARG GCLOUD_CLI_SHA256_ARM64=58cb835c823514d1eee2b87f938f2bc6240f5a745e9cc73d142a1260da129e25
@@ -557,7 +559,14 @@ RUN set -eux; \
     test "$(command -v gcloud)" = "/usr/local/google-cloud-sdk/bin/gcloud"; \
     gcloud_ver_out="$(gcloud version 2>&1)"; \
     printf '%s\n' "${gcloud_ver_out}"; \
-    printf '%s\n' "${gcloud_ver_out}" | grep -F "Google Cloud SDK ${GCLOUD_CLI_VERSION}"
+    printf '%s\n' "${gcloud_ver_out}" | grep -F "Google Cloud SDK ${GCLOUD_CLI_VERSION}"; \
+    CLOUDSDK_CORE_DISABLE_PROMPTS=1 gcloud components install --quiet gke-gcloud-auth-plugin; \
+    test -x /usr/local/google-cloud-sdk/bin/gke-gcloud-auth-plugin; \
+    hash -r; \
+    test "$(command -v gke-gcloud-auth-plugin)" = "/usr/local/google-cloud-sdk/bin/gke-gcloud-auth-plugin"; \
+    plugin_ver_out="$(gke-gcloud-auth-plugin --version)"; \
+    printf '%s\n' "${plugin_ver_out}"; \
+    test -n "${plugin_ver_out}"
 ENV PATH="/usr/local/google-cloud-sdk/bin:${PATH}"
 
 # kubectl is pinned to a concrete Kubernetes release. Keep this layer after

@@ -102,8 +102,9 @@ scripts/update-cursor.sh 2026.07.16-899851b
 
 Google Cloud CLI is pinned in `dev.Dockerfile` with checksums for both Linux
 image architectures. The pin is a versioned rapid-channel SDK archive (core CLI
-plus default bundled components). To update it to the latest rapid-channel
-release:
+plus default bundled components). The image then installs
+`gke-gcloud-auth-plugin` with `gcloud components install` so kubectl can
+authenticate to GKE. To update gcloud to the latest rapid-channel release:
 
 ```sh
 scripts/update-gcloud-cli.sh
@@ -317,7 +318,7 @@ containers without forcing the user to re-authenticate tools.
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
 Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Google Cloud CLI (`gcloud`),
-kubectl, Modal CLI, Blender CLI, `ping`, jq,
+kubectl, `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
 bash, build tools, common dev headers, and the Docker CLI with the Compose
