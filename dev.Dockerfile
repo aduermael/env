@@ -571,9 +571,9 @@ ENV PATH="/usr/local/google-cloud-sdk/bin:${PATH}"
 
 # kubectl is pinned to a concrete Kubernetes release. Keep this layer after
 # gcloud so version bumps only rebuild this install and the cheap final setup.
-ARG KUBECTL_VERSION=v1.37.0
-ARG KUBECTL_SHA256_AMD64=6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
-ARG KUBECTL_SHA256_ARM64=922df28df248cc00a9e025f947704f1d1482de64ece54cfe57e61f19eaf1eef3
+ARG KUBECTL_VERSION=v1.37.1
+ARG KUBECTL_SHA256_AMD64=65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
+ARG KUBECTL_SHA256_ARM64=ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
