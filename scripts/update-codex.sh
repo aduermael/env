@@ -11,7 +11,8 @@ usage() {
     cat <<'EOF'
 Usage: scripts/update-codex.sh [latest|VERSION|TAG]
 
-Updates the Codex release pin in dev.Dockerfile (CLI + code-mode host).
+Updates the Codex release pin in dev.Dockerfile. The pin is the full
+codex-package archive (CLI, code-mode host, rg, and bwrap).
 
 Examples:
   scripts/update-codex.sh
@@ -74,37 +75,38 @@ normalize_release_tag() {
     esac
 }
 
-download_asset() {
-    local tag="$1"
-    local target="$2"
-    local output="$3"
-    local asset="codex-${target}.tar.gz"
-    local url="https://github.com/${codex_repo}/releases/download/${tag}/${asset}"
-
-    printf 'download: %s\n' "$asset"
-    curl -fsSL --retry 3 --retry-delay 2 -o "$output" "$url"
-    tar -tzf "$output" | grep -Fxq "codex-${target}" || die "asset ${asset} does not contain codex-${target}"
+package_has_entry() {
+    local listing="$1"
+    local entry="$2"
+    grep -Fxq "$entry" <<< "$listing"
 }
 
-download_code_mode_host_asset() {
+download_package_asset() {
     local tag="$1"
     local target="$2"
     local output="$3"
-    local asset="codex-code-mode-host-${target}.tar.gz"
+    local asset="codex-package-${target}.tar.gz"
     local url="https://github.com/${codex_repo}/releases/download/${tag}/${asset}"
-    local entry="codex-code-mode-host-${target}"
+    local listing entry
 
     printf 'download: %s\n' "$asset"
     curl -fsSL --retry 3 --retry-delay 2 -o "$output" "$url"
-    tar -tzf "$output" | grep -Fxq "$entry" || die "asset ${asset} does not contain ${entry}"
+    listing="$(tar -tzf "$output")"
+    for entry in \
+        codex-package.json \
+        bin/codex \
+        bin/codex-code-mode-host \
+        codex-path/rg \
+        codex-resources/bwrap
+    do
+        package_has_entry "$listing" "$entry" || die "asset ${asset} does not contain ${entry}"
+    done
 }
 
 update_dockerfile() {
     local tag="$1"
     local sha_amd64="$2"
     local sha_arm64="$3"
-    local host_sha_amd64="$4"
-    local host_sha_arm64="$5"
     local tmp
 
     [[ -f "$dockerfile" ]] || die "Dockerfile not found: $dockerfile"
@@ -114,8 +116,6 @@ update_dockerfile() {
         -v tag="$tag" \
         -v sha_amd64="$sha_amd64" \
         -v sha_arm64="$sha_arm64" \
-        -v host_sha_amd64="$host_sha_amd64" \
-        -v host_sha_arm64="$host_sha_arm64" \
         '
         /^ARG CODEX_VERSION=/ {
             print "ARG CODEX_VERSION=" tag
@@ -132,25 +132,15 @@ update_dockerfile() {
             saw_arm64 = 1
             next
         }
-        /^ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=/ {
-            print "ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=" host_sha_amd64
-            saw_host_amd64 = 1
-            next
-        }
-        /^ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=/ {
-            print "ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=" host_sha_arm64
-            saw_host_arm64 = 1
-            next
-        }
         { print }
         END {
-            if (!saw_version || !saw_amd64 || !saw_arm64 || !saw_host_amd64 || !saw_host_arm64) {
+            if (!saw_version || !saw_amd64 || !saw_arm64) {
                 exit 1
             }
         }
         ' "$dockerfile" > "$tmp" || {
             rm -f "$tmp"
-            die "could not update Codex ARGs in $dockerfile (missing CODEX_* or CODEX_CODE_MODE_HOST_* ARG lines?)"
+            die "could not update Codex ARGs in $dockerfile (missing CODEX_VERSION or CODEX_SHA256_* ARG lines?)"
         }
 
     cp "$tmp" "$dockerfile"
@@ -184,24 +174,33 @@ smoke_check_cli_binary() {
 
     smoke_dir="${tmpdir}/smoke"
     mkdir -p "$smoke_dir"
-    tar -xzf "$tarball" -C "$smoke_dir"
-    out="$("${smoke_dir}/codex-${target}" --version)"
+    tar -xzf "$tarball" -C "$smoke_dir" bin/codex
+    out="$("${smoke_dir}/bin/codex" --version)"
     [[ "$out" == "codex-cli ${version}" ]] || die "unexpected Codex version output: ${out}"
-    printf 'ok: %s --version -> %s\n' "codex-${target}" "$out"
+    printf 'ok: %s bin/codex --version -> %s\n' "codex-package-${target}.tar.gz" "$out"
 }
 
-smoke_check_code_mode_host_archives() {
-    local amd64_tar="$1"
-    local arm64_tar="$2"
-    local entry
+smoke_check_package_archives() {
+    local version="$1"
+    local amd64_tar="$2"
+    local arm64_tar="$3"
+    local archive listing entry manifest
 
-    entry="codex-code-mode-host-x86_64-unknown-linux-musl"
-    tar -tzf "$amd64_tar" | grep -Fxq "$entry" || die "amd64 host archive missing ${entry}"
-    printf 'ok: amd64 host archive contains %s\n' "$entry"
-
-    entry="codex-code-mode-host-aarch64-unknown-linux-musl"
-    tar -tzf "$arm64_tar" | grep -Fxq "$entry" || die "arm64 host archive missing ${entry}"
-    printf 'ok: arm64 host archive contains %s\n' "$entry"
+    for archive in "$amd64_tar" "$arm64_tar"; do
+        listing="$(tar -tzf "$archive")"
+        for entry in \
+            codex-package.json \
+            bin/codex \
+            bin/codex-code-mode-host \
+            codex-path/rg \
+            codex-resources/bwrap
+        do
+            package_has_entry "$listing" "$entry" || die "$(basename "$archive") missing ${entry}"
+        done
+        manifest="$(tar -xOzf "$archive" codex-package.json)"
+        grep -Fq "\"version\": \"${version}\"" <<< "$manifest" || die "$(basename "$archive") manifest version is not ${version}"
+        printf 'ok: %s contains the Codex package for %s\n' "$(basename "$archive")" "$version"
+    done
 }
 
 main() {
@@ -223,7 +222,6 @@ main() {
 
     local tag version tmpdir
     local amd64_tar arm64_tar sha_amd64 sha_arm64
-    local host_amd64_tar host_arm64_tar host_sha_amd64 host_sha_arm64
 
     tag="$(normalize_release_tag "$requested_version")"
     version="${tag#rust-v}"
@@ -234,31 +232,23 @@ main() {
     trap 'rm -rf "$cleanup_tmpdir"' EXIT
 
     printf 'release: %s\n' "$tag"
-    amd64_tar="${tmpdir}/codex-x86_64-unknown-linux-musl.tar.gz"
-    arm64_tar="${tmpdir}/codex-aarch64-unknown-linux-musl.tar.gz"
-    host_amd64_tar="${tmpdir}/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz"
-    host_arm64_tar="${tmpdir}/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz"
+    amd64_tar="${tmpdir}/codex-package-x86_64-unknown-linux-musl.tar.gz"
+    arm64_tar="${tmpdir}/codex-package-aarch64-unknown-linux-musl.tar.gz"
 
-    download_asset "$tag" "x86_64-unknown-linux-musl" "$amd64_tar"
-    download_asset "$tag" "aarch64-unknown-linux-musl" "$arm64_tar"
-    download_code_mode_host_asset "$tag" "x86_64-unknown-linux-musl" "$host_amd64_tar"
-    download_code_mode_host_asset "$tag" "aarch64-unknown-linux-musl" "$host_arm64_tar"
+    download_package_asset "$tag" "x86_64-unknown-linux-musl" "$amd64_tar"
+    download_package_asset "$tag" "aarch64-unknown-linux-musl" "$arm64_tar"
 
     sha_amd64="$(sha256_file "$amd64_tar")"
     sha_arm64="$(sha256_file "$arm64_tar")"
-    host_sha_amd64="$(sha256_file "$host_amd64_tar")"
-    host_sha_arm64="$(sha256_file "$host_arm64_tar")"
 
-    update_dockerfile "$tag" "$sha_amd64" "$sha_arm64" "$host_sha_amd64" "$host_sha_arm64"
+    update_dockerfile "$tag" "$sha_amd64" "$sha_arm64"
     smoke_check_cli_binary "$version" "$tmpdir" "$amd64_tar" "$arm64_tar"
-    smoke_check_code_mode_host_archives "$host_amd64_tar" "$host_arm64_tar"
+    smoke_check_package_archives "$version" "$amd64_tar" "$arm64_tar"
 
     printf 'updated: %s\n' "$dockerfile"
     printf 'CODEX_VERSION=%s\n' "$tag"
     printf 'CODEX_SHA256_AMD64=%s\n' "$sha_amd64"
     printf 'CODEX_SHA256_ARM64=%s\n' "$sha_arm64"
-    printf 'CODEX_CODE_MODE_HOST_SHA256_AMD64=%s\n' "$host_sha_amd64"
-    printf 'CODEX_CODE_MODE_HOST_SHA256_ARM64=%s\n' "$host_sha_arm64"
 }
 
 main "$@"
