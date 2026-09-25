@@ -55,7 +55,9 @@ scripts/update-devenv-from-source.sh
 ### Update Codex in the dev image
 
 Codex is pinned in `dev.Dockerfile` with checksums for both Linux image
-architectures. To update it to the latest upstream release:
+architectures. The checksums cover the full `codex-package-*` archive
+(CLI, code-mode host, `rg`, and `bwrap`). To update it to the latest
+upstream release:
 
 ```sh
 scripts/update-codex.sh
@@ -336,9 +338,12 @@ container is the isolation boundary. Do not mount sensitive host paths into
 containers where Codex runs with broad autonomy. Use the safe Docker socket proxy
 if Docker CLI access is needed.
 
-`codex-code-mode-host` is installed at `/usr/local/bin/codex-code-mode-host` and
-symlinked to `/usr/local/libexec/codex-code-mode-host`, which is where Codex
-0.153 looks for it.
+Codex is installed from `codex-package-*` at
+`/usr/local/lib/codex/<version>-<target>`. `/usr/local/bin/codex` points at
+`bin/codex` inside that package so the CLI can find `codex-package.json`,
+`codex-path/rg`, and `codex-resources/bwrap`. `codex-code-mode-host` ships in
+the same package, at `/usr/local/bin/codex-code-mode-host` and
+`/usr/local/libexec/codex-code-mode-host`.
 
 Codex SQLite state uses `CODEX_SQLITE_HOME=/var/lib/codex-sqlite`. Leave that on
 a Linux volume, not the macOS `~/.devenv/home` bind mount. Codex writes TRACE

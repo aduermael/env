@@ -472,41 +472,44 @@ RUN set -eux; \
     rm /tmp/grok; \
     grok --version
 
+# Codex 0.157 starts its app server only from a complete local package.
+# CODEX_SHA256_* are digests of codex-package-${target}.tar.gz, which contains
+# bin/codex, bin/codex-code-mode-host, codex-package.json, codex-path/rg, and
+# codex-resources/bwrap. Installing the bare codex-${target} binary alone
+# makes `codex` exit with "this CLI has no complete local package".
 ARG CODEX_VERSION=rust-v0.157.0
-ARG CODEX_SHA256_AMD64=db3fe3adaa35c50edfb68a988a117782fe3492960fb63d7003eb6748ccc0657b
-ARG CODEX_SHA256_ARM64=e6fbe2798e941b833f7e3bc34010f7443240ac4a149ce1876f32cbfa0ba7d25f
-ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=47d32419e895c9cddbb664a2890bfb250ef0e3fded3da70e5f2bc61479f1989c
-ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=3b31358135e16bf8090efcb0404c44807c512a4fd82387de03a52a51ed05c910
+ARG CODEX_SHA256_AMD64=042f851ea3fc1083c45157520520944fc790632b53ebc580fc98eaca55862a25
+ARG CODEX_SHA256_ARM64=c1c36beab0b4f72779adf53ba9e9e494bf7cbfbe4f3506a08ff67a24f5f00d08
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
         amd64|x86_64) \
             codex_target="x86_64-unknown-linux-musl"; \
-            codex_sha256="${CODEX_SHA256_AMD64}"; \
-            codex_code_mode_host_sha256="${CODEX_CODE_MODE_HOST_SHA256_AMD64}" ;; \
+            codex_sha256="${CODEX_SHA256_AMD64}" ;; \
         arm64|aarch64) \
             codex_target="aarch64-unknown-linux-musl"; \
-            codex_sha256="${CODEX_SHA256_ARM64}"; \
-            codex_code_mode_host_sha256="${CODEX_CODE_MODE_HOST_SHA256_ARM64}" ;; \
+            codex_sha256="${CODEX_SHA256_ARM64}" ;; \
         *) echo "Unsupported image architecture for Codex: ${image_arch}" >&2; exit 1 ;; \
     esac; \
-    codex_asset="codex-${codex_target}.tar.gz"; \
+    codex_version="${CODEX_VERSION#rust-v}"; \
+    codex_asset="codex-package-${codex_target}.tar.gz"; \
     codex_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${codex_asset}"; \
-    curl -fsSL "${codex_url}" -o /tmp/codex.tar.gz; \
-    echo "${codex_sha256}  /tmp/codex.tar.gz" | sha256sum -c -; \
-    mkdir -p /tmp/codex; \
-    tar -xzf /tmp/codex.tar.gz -C /tmp/codex; \
-    install -m 0755 "/tmp/codex/codex-${codex_target}" /usr/local/bin/codex; \
-    rm -rf /tmp/codex /tmp/codex.tar.gz; \
-    host_asset="codex-code-mode-host-${codex_target}.tar.gz"; \
-    host_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${host_asset}"; \
-    curl -fsSL "${host_url}" -o /tmp/codex-code-mode-host.tar.gz; \
-    echo "${codex_code_mode_host_sha256}  /tmp/codex-code-mode-host.tar.gz" | sha256sum -c -; \
-    mkdir -p /tmp/codex-code-mode-host; \
-    tar -xzf /tmp/codex-code-mode-host.tar.gz -C /tmp/codex-code-mode-host; \
-    install -m 0755 "/tmp/codex-code-mode-host/codex-code-mode-host-${codex_target}" /usr/local/bin/codex-code-mode-host; \
-    rm -rf /tmp/codex-code-mode-host /tmp/codex-code-mode-host.tar.gz; \
-    codex --version; \
+    curl -fsSL "${codex_url}" -o /tmp/codex-package.tar.gz; \
+    echo "${codex_sha256}  /tmp/codex-package.tar.gz" | sha256sum -c -; \
+    codex_root="/usr/local/lib/codex/${codex_version}-${codex_target}"; \
+    mkdir -p "${codex_root}"; \
+    tar --no-same-owner -xzf /tmp/codex-package.tar.gz -C "${codex_root}"; \
+    rm /tmp/codex-package.tar.gz; \
+    test -f "${codex_root}/codex-package.json"; \
+    test -x "${codex_root}/bin/codex"; \
+    test -x "${codex_root}/bin/codex-code-mode-host"; \
+    test -x "${codex_root}/codex-path/rg"; \
+    test -x "${codex_root}/codex-resources/bwrap"; \
+    ln -sfn "${codex_root}" /usr/local/lib/codex/current; \
+    ln -sfn /usr/local/lib/codex/current/bin/codex /usr/local/bin/codex; \
+    ln -sfn /usr/local/lib/codex/current/bin/codex-code-mode-host /usr/local/bin/codex-code-mode-host; \
+    test "$(readlink -f /usr/local/bin/codex)" = "${codex_root}/bin/codex"; \
+    test "$(codex --version)" = "codex-cli ${codex_version}"; \
     test -x /usr/local/bin/codex-code-mode-host
 
 ARG CURSOR_CLI_VERSION=2026.09.23-86fc751
@@ -746,7 +749,7 @@ EOF
 # TUI startup on "loading" the model.
 RUN set -eux; \
     install -d -m 0755 /usr/local/libexec; \
-    ln -sfr /usr/local/bin/codex-code-mode-host /usr/local/libexec/codex-code-mode-host; \
+    ln -sfn ../bin/codex-code-mode-host /usr/local/libexec/codex-code-mode-host; \
     test -x /usr/local/bin/codex-code-mode-host; \
     test -x /usr/local/libexec/codex-code-mode-host; \
     install -d -m 1777 /var/lib/codex-sqlite
