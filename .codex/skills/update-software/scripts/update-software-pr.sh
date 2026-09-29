@@ -23,7 +23,7 @@ usage() {
     cat <<'EOF'
 Usage: update-software-pr.sh PACKAGE [latest|VERSION|TAG]
 
-PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl
+PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger
 
 Runs that package's ./scripts/update-*.sh from a fresh origin/main worktree.
 If dev.Dockerfile changes, creates a branch, pushes it, and opens a PR.
@@ -62,9 +62,15 @@ configure_package() {
             display_name="kubectl"
             checksum_blurb="update amd64 and arm64 checksums for the new Kubernetes release"
             ;;
+        dagger)
+            updater_rel="scripts/update-dagger.sh"
+            version_arg="DAGGER_CLI_VERSION"
+            display_name="Dagger CLI"
+            checksum_blurb="update amd64 and arm64 checksums for the new Dagger CLI release"
+            ;;
         *)
             usage >&2
-            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, or kubectl)"
+            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, kubectl, or dagger)"
             ;;
     esac
     package="$1"

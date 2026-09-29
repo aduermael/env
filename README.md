@@ -133,6 +133,21 @@ To pin a specific release instead:
 scripts/update-kubectl.sh v1.37.0
 ```
 
+### Update Dagger CLI in the dev image
+
+Dagger CLI is pinned in `dev.Dockerfile` with checksums for both Linux image
+architectures. To update it to the latest Dagger release:
+
+```sh
+scripts/update-dagger.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-dagger.sh v0.21.9
+```
+
 ## CLI Reference
 
 ```sh
@@ -320,7 +335,7 @@ containers without forcing the user to re-authenticate tools.
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
 Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Google Cloud CLI (`gcloud`),
-kubectl, `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
+kubectl, Dagger CLI (`dagger`), `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
 bash, build tools, common dev headers, and the Docker CLI with the Compose
