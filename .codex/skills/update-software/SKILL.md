@@ -1,6 +1,6 @@
 ---
 name: update-software
-description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Google Cloud CLI (gcloud), kubectl, or Dagger CLI release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
+description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Claude Code CLI, Google Cloud CLI (gcloud), kubectl, or Dagger CLI release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
 ---
 
 # Update software pins
@@ -15,6 +15,7 @@ Supported `PACKAGE` values:
 - `gcloud-cli` — `./scripts/update-gcloud-cli.sh`
 - `kubectl` — `./scripts/update-kubectl.sh`
 - `dagger` — `./scripts/update-dagger.sh`
+- `claude` — `./scripts/update-claude.sh` (without a release argument, tracks the `@anthropic-ai/claude-code` NPM `latest` dist-tag)
 
 ## Workflow
 
@@ -33,6 +34,7 @@ Pass one optional release argument only when the user requested a specific versi
 ./.codex/skills/update-software/scripts/update-software-pr.sh gcloud-cli 581.0.0
 ./.codex/skills/update-software/scripts/update-software-pr.sh kubectl v1.37.0
 ./.codex/skills/update-software/scripts/update-software-pr.sh dagger v0.21.9
+./.codex/skills/update-software/scripts/update-software-pr.sh claude 2.1.238
 ```
 
 The runner enforces the required behavior:

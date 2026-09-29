@@ -148,6 +148,23 @@ To pin a specific release instead:
 scripts/update-dagger.sh v0.21.9
 ```
 
+### Update Claude Code CLI in the dev image
+
+Claude Code CLI is pinned in `dev.Dockerfile` as the npm package
+`@anthropic-ai/claude-code`. The image installs that exact version and fails
+the build unless `claude --version` contains the pin. To update it to the
+latest npm `latest` release:
+
+```sh
+scripts/update-claude.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-claude.sh 2.1.238
+```
+
 ## CLI Reference
 
 ```sh

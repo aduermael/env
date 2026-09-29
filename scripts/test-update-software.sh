@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Fixture test for the unified update-software skill runner.
 # Drives the shipped runner against a local git fixture for grok, codex,
-# cursor, gcloud-cli, kubectl, and dagger: dirty worktree abort, matching updater dispatch,
+# cursor, gcloud-cli, kubectl, dagger, and claude: dirty worktree abort, matching updater dispatch,
 # and unchanged-Dockerfile no-update path.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pr_runner="${repo_root}/.codex/skills/update-software/scripts/update-software-pr.sh"
-packages=(grok codex cursor gcloud-cli kubectl dagger)
+packages=(grok codex cursor gcloud-cli kubectl dagger claude)
 tmpdir=""
 
 die() {
@@ -66,6 +66,7 @@ ARG CURSOR_CLI_VERSION=0.0.0
 ARG GCLOUD_CLI_VERSION=0.0.0
 ARG KUBECTL_VERSION=0.0.0
 ARG DAGGER_CLI_VERSION=0.0.0
+ARG CLAUDE_CODE_VERSION=0.0.0
 EOF
 
 for pkg in "${packages[@]}"; do
@@ -136,6 +137,8 @@ for pkg in "${packages[@]}"; do
     [[ ! -s "$invocation_log" ]] || die "${pkg}: updater ran on dirty worktree: $(cat "$invocation_log")"
     assert_no_commit_or_pr "$pkg"
     printf 'ok: %s dirty worktree aborts\n' "$pkg"
+    printf '%s\n' "$RUNNER_OUTPUT" | grep -F 'working tree is dirty'
+    printf 'updater not invoked; dev.Dockerfile unchanged; gh not invoked; no extra origin branch\n'
 
     rm -f "${fixture}/dirty.txt"
     : > "$invocation_log"
@@ -149,6 +152,21 @@ for pkg in "${packages[@]}"; do
         || die "${pkg}: expected updater update-${pkg}.sh, got: $(cat "$invocation_log")"
     assert_no_commit_or_pr "$pkg"
     printf 'ok: %s dispatched matching updater and skipped commit/PR\n' "$pkg"
+    printf 'invocation: %s\n' "$(cat "$invocation_log")"
+    printf '%s\n' "$RUNNER_OUTPUT" | grep -F 'no update detected: dev.Dockerfile is unchanged'
+    printf 'no commit or PR created\n'
 done
+
+: > "$invocation_log"
+rm -f "$gh_log"
+run_runner "not-a-package"
+[[ "$RUNNER_STATUS" -ne 0 ]] || die "unknown package exited 0: ${RUNNER_OUTPUT}"
+printf '%s\n' "$RUNNER_OUTPUT" | grep -Fq 'unknown package' \
+    || die "unknown package output missing unknown-package error: ${RUNNER_OUTPUT}"
+printf '%s\n' "$RUNNER_OUTPUT" | grep -Fq 'claude' \
+    || die "unknown package error does not name claude: ${RUNNER_OUTPUT}"
+[[ ! -s "$invocation_log" ]] || die "unknown package invoked an updater: $(cat "$invocation_log")"
+assert_no_commit_or_pr "unknown package"
+printf 'ok: unknown package exits non-zero (%s)\n' "$(printf '%s\n' "$RUNNER_OUTPUT" | grep -F 'unknown package' | head -n 1)"
 
 printf 'ALL CHECKS PASSED\n'

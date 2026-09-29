@@ -449,7 +449,9 @@ RUN set -eux; \
     pnpm add -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
     claude_pkg="$(pnpm list -g --depth -1 --json @anthropic-ai/claude-code | jq -r '.[0].dependencies["@anthropic-ai/claude-code"].path')"; \
     node "${claude_pkg}/install.cjs"; \
-    claude --version; \
+    claude_ver_out="$(claude --version)"; \
+    printf '%s\n' "${claude_ver_out}"; \
+    printf '%s\n' "${claude_ver_out}" | grep -F "${CLAUDE_CODE_VERSION}"; \
     pnpm store prune; \
     chgrp -R devtools "${COREPACK_HOME}" "${PNPM_HOME}"; \
     chmod -R g+rwX,a+rX "${COREPACK_HOME}" "${PNPM_HOME}"; \
