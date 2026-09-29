@@ -385,7 +385,7 @@ RUN set -eux; \
     find "${BAZELISK_HOME}" -type d -exec chmod g+s {} +
 
 # Blender is large and slow-moving. Keep it with the expensive runtimes so
-# assistant CLI, gcloud, and kubectl bumps do not rebuild it. Upstream publishes
+# assistant CLI, gcloud, kubectl, and Dagger CLI bumps do not rebuild it. Upstream publishes
 # linux-x64 only; arm64 uses an unofficial portable Rocky Linux 8 build.
 ARG BLENDER_VERSION=5.2.1
 ARG BLENDER_SHA256_AMD64=a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9
@@ -595,6 +595,33 @@ RUN set -eux; \
     kubectl_ver_out="$(kubectl version --client=true)"; \
     printf '%s\n' "${kubectl_ver_out}"; \
     printf '%s\n' "${kubectl_ver_out}" | grep -F "Client Version: ${KUBECTL_VERSION}"
+
+# Dagger CLI is pinned to a concrete Dagger release. Keep this layer after
+# kubectl so version bumps only rebuild this install and the cheap final setup.
+ARG DAGGER_CLI_VERSION=v0.21.9
+ARG DAGGER_CLI_SHA256_AMD64=33eea0b08d6be444bada18e64b2216459100d6070abcb4b5345cee40c9fff982
+ARG DAGGER_CLI_SHA256_ARM64=3bc8334ccde404f66f0a8e29807e4327c7893990c3211691680c5f07f8273f3a
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) dagger_arch="amd64"; dagger_sha256="${DAGGER_CLI_SHA256_AMD64}" ;; \
+        arm64|aarch64) dagger_arch="arm64"; dagger_sha256="${DAGGER_CLI_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Dagger CLI: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    dagger_version="${DAGGER_CLI_VERSION#v}"; \
+    dagger_file="dagger_${DAGGER_CLI_VERSION}_linux_${dagger_arch}.tar.gz"; \
+    curl -fsSL "https://dl.dagger.io/dagger/releases/${dagger_version}/${dagger_file}" -o "/tmp/${dagger_file}"; \
+    echo "${dagger_sha256}  /tmp/${dagger_file}" | sha256sum -c -; \
+    mkdir -p /tmp/dagger-cli; \
+    tar --no-same-owner -xzf "/tmp/${dagger_file}" -C /tmp/dagger-cli; \
+    install -m 0755 /tmp/dagger-cli/dagger /usr/local/bin/dagger; \
+    rm -rf /tmp/dagger-cli "/tmp/${dagger_file}"; \
+    test -x /usr/local/bin/dagger; \
+    hash -r; \
+    test "$(command -v dagger)" = "/usr/local/bin/dagger"; \
+    dagger_ver_out="$(dagger version)"; \
+    printf '%s\n' "${dagger_ver_out}"; \
+    printf '%s\n' "${dagger_ver_out}" | grep -F "dagger ${DAGGER_CLI_VERSION}"
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
