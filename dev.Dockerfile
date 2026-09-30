@@ -598,11 +598,11 @@ RUN set -eux; \
     printf '%s\n' "${kubectl_ver_out}"; \
     printf '%s\n' "${kubectl_ver_out}" | grep -F "Client Version: ${KUBECTL_VERSION}"
 
-# Dagger CLI is pinned to a concrete Dagger release. Keep this layer after
+# Dagger CLI tracks the newest v1.0.0-beta.N release. Keep this layer after
 # kubectl so version bumps only rebuild this install and the cheap final setup.
-ARG DAGGER_CLI_VERSION=v0.21.9
-ARG DAGGER_CLI_SHA256_AMD64=33eea0b08d6be444bada18e64b2216459100d6070abcb4b5345cee40c9fff982
-ARG DAGGER_CLI_SHA256_ARM64=3bc8334ccde404f66f0a8e29807e4327c7893990c3211691680c5f07f8273f3a
+ARG DAGGER_CLI_VERSION=v1.0.0-beta.15
+ARG DAGGER_CLI_SHA256_AMD64=c00b0b21a77f9cd069605806856e4c9eec57320a61e18eefc4c38ed48b013b75
+ARG DAGGER_CLI_SHA256_ARM64=0afa9260fd4b537018bfec942503715a0db5cb69866797928f434a4cf655c568
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
@@ -623,7 +623,7 @@ RUN set -eux; \
     test "$(command -v dagger)" = "/usr/local/bin/dagger"; \
     dagger_ver_out="$(dagger version)"; \
     printf '%s\n' "${dagger_ver_out}"; \
-    printf '%s\n' "${dagger_ver_out}" | grep -F "dagger ${DAGGER_CLI_VERSION}"
+    printf '%s\n' "${dagger_ver_out}" | grep -F "${DAGGER_CLI_VERSION}"
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \

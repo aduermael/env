@@ -12,15 +12,17 @@ usage() {
 Usage: scripts/update-dagger.sh [latest|VERSION]
 
 Updates the Dagger CLI pin in dev.Dockerfile.
+Without a version, tracks the newest v1.0.0-beta.N release.
+The stable 0.x channel at versions/latest is a different line.
 
 Examples:
   scripts/update-dagger.sh
-  scripts/update-dagger.sh v0.21.9
-  scripts/update-dagger.sh 0.21.9
+  scripts/update-dagger.sh v1.0.0-beta.15
+  scripts/update-dagger.sh 1.0.0-beta.15
 
 Environment:
   DOCKERFILE           Path to the Dockerfile to update. Defaults to dev.Dockerfile.
-  DAGGER_CLI_BASE_URL  Base URL for Dagger CLI version pointers and release archives.
+  DAGGER_CLI_BASE_URL  Base URL for Dagger CLI release archives.
                        Defaults to https://dl.dagger.io/dagger.
 EOF
 }
@@ -47,17 +49,23 @@ sha256_file() {
 
 validate_version() {
     local version="$1"
-    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "unexpected Dagger CLI version: $version"
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || die "unexpected Dagger CLI version: $version"
 }
 
 latest_release_version() {
-    local bare
+    local best
 
-    bare="$(curl -fsSL --retry 3 --retry-delay 2 "${dagger_cli_base_url%/}/versions/latest" | tr -d '[:space:]')"
-    [[ -n "$bare" ]] || die "could not resolve latest Dagger CLI version from ${dagger_cli_base_url%/}/versions/latest"
-    bare="${bare#v}"
-    validate_version "v${bare}"
-    printf 'v%s\n' "$bare"
+    require_command git
+    best="$(
+        git ls-remote --tags https://github.com/dagger/dagger.git 'v1.0.0-beta.*' |
+            awk '{ sub(/^.*\//, "", $2); print $2 }' |
+            sed -n 's/^v1\.0\.0-beta\.\([0-9][0-9]*\)$/\1/p' |
+            sort -n |
+            tail -n 1
+    )"
+    [[ -n "$best" ]] || die "could not resolve latest Dagger CLI 1.0.0 beta"
+    validate_version "v1.0.0-beta.${best}"
+    printf 'v1.0.0-beta.%s\n' "$best"
 }
 
 normalize_release_version() {
@@ -75,7 +83,7 @@ normalize_release_version() {
             printf 'v%s\n' "$input"
             ;;
         *)
-            die "expected latest or a version like v0.21.9"
+            die "expected latest or a version like v1.0.0-beta.15"
             ;;
     esac
 }
@@ -186,7 +194,7 @@ smoke_check_host_binary() {
     mkdir -p "$smoke_dir"
     tar --no-same-owner -xzf "$tarball" -C "$smoke_dir"
     out="$("${smoke_dir}/dagger" version)"
-    printf '%s\n' "$out" | grep -Fq "dagger ${version}" ||
+    printf '%s\n' "$out" | grep -Fq "${version}" ||
         die "unexpected Dagger CLI version output: ${out}"
     printf 'ok: dagger-%s version -> %s\n' "$target" "$(printf '%s\n' "$out" | head -n 1)"
 }

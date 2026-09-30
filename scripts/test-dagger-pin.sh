@@ -46,7 +46,7 @@ version="$(arg_value DAGGER_CLI_VERSION)"
 sha_amd64="$(arg_value DAGGER_CLI_SHA256_AMD64)"
 sha_arm64="$(arg_value DAGGER_CLI_SHA256_ARM64)"
 
-[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "DAGGER_CLI_VERSION must be vX.Y.Z, got: $version"
+[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || die "DAGGER_CLI_VERSION must be vX.Y.Z or v1.0.0-beta.N, got: $version"
 [[ ${#sha_amd64} -eq 64 ]] || die "amd64 SHA must be 64 hex chars"
 [[ ${#sha_arm64} -eq 64 ]] || die "arm64 SHA must be 64 hex chars"
 [[ "$sha_amd64" =~ ^[0-9a-f]{64}$ ]] || die "amd64 SHA must be lowercase hex"
@@ -62,7 +62,7 @@ grep -Fq 'test -x /usr/local/bin/dagger' "$dockerfile" \
     || die "Dockerfile does not assert /usr/local/bin/dagger is executable"
 grep -Eq 'dagger version' "$dockerfile" \
     || die "Dockerfile does not invoke dagger version during the image build"
-grep -Fq 'grep -F "dagger ${DAGGER_CLI_VERSION}"' "$dockerfile" \
+grep -Fq 'grep -F "${DAGGER_CLI_VERSION}"' "$dockerfile" \
     || die "Dockerfile does not check dagger version against the pinned release"
 
 # Live checksums for the pinned versioned archives (the files the Dockerfile fetches).
