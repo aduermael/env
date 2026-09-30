@@ -444,7 +444,7 @@ RUN set -eux; \
     pnpm add -g "@google/gemini-cli@${GEMINI_CLI_VERSION}"; \
     gemini --version
 
-ARG CLAUDE_CODE_VERSION=2.1.238
+ARG CLAUDE_CODE_VERSION=2.1.285
 RUN set -eux; \
     pnpm add -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
     claude_pkg="$(pnpm list -g --depth -1 --json @anthropic-ai/claude-code | jq -r '.[0].dependencies["@anthropic-ai/claude-code"].path')"; \
