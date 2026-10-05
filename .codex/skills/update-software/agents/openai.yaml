@@ -1,7 +1,7 @@
 interface:
   display_name: "Update software"
-  short_description: "Run a Grok, Codex, Cursor CLI, Claude Code CLI, gcloud CLI, kubectl, or Dagger CLI dev image update flow"
-  default_prompt: "Use $update-software to update a repo pin (Grok Build, Codex, Cursor CLI, Claude Code CLI, gcloud CLI, kubectl, or Dagger CLI) and open a PR."
+  short_description: "Run a Grok, Codex, Cursor CLI, Claude Code CLI, gcloud CLI, kubectl, Dagger CLI, or Terraform dev image update flow"
+  default_prompt: "Use $update-software to update a repo pin (Grok Build, Codex, Cursor CLI, Claude Code CLI, gcloud CLI, kubectl, Dagger CLI, or Terraform) and open a PR."
 
 policy:
   allow_implicit_invocation: false

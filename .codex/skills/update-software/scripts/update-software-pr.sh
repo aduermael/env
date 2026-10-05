@@ -23,7 +23,7 @@ usage() {
     cat <<'EOF'
 Usage: update-software-pr.sh PACKAGE [latest|VERSION|TAG]
 
-PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude
+PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform
 
 Runs that package's ./scripts/update-*.sh from a fresh origin/main worktree.
 If dev.Dockerfile changes, creates a branch, pushes it, and opens a PR.
@@ -68,6 +68,12 @@ configure_package() {
             display_name="Dagger CLI"
             checksum_blurb="update amd64 and arm64 checksums for the new Dagger CLI release"
             ;;
+        terraform)
+            updater_rel="scripts/update-terraform.sh"
+            version_arg="TERRAFORM_VERSION"
+            display_name="Terraform"
+            checksum_blurb="update amd64 and arm64 checksums for the new Terraform release"
+            ;;
         claude)
             updater_rel="scripts/update-claude.sh"
             version_arg="CLAUDE_CODE_VERSION"
@@ -76,7 +82,7 @@ configure_package() {
             ;;
         *)
             usage >&2
-            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, kubectl, dagger, or claude)"
+            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, or terraform)"
             ;;
     esac
     package="$1"

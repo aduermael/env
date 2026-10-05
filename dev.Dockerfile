@@ -385,7 +385,7 @@ RUN set -eux; \
     find "${BAZELISK_HOME}" -type d -exec chmod g+s {} +
 
 # Blender is large and slow-moving. Keep it with the expensive runtimes so
-# assistant CLI, gcloud, kubectl, and Dagger CLI bumps do not rebuild it. Upstream publishes
+# assistant CLI, gcloud, kubectl, Dagger CLI, and Terraform bumps do not rebuild it. Upstream publishes
 # linux-x64 only; arm64 uses an unofficial portable Rocky Linux 8 build.
 ARG BLENDER_VERSION=5.2.1
 ARG BLENDER_SHA256_AMD64=a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9
@@ -624,6 +624,33 @@ RUN set -eux; \
     dagger_ver_out="$(dagger version)"; \
     printf '%s\n' "${dagger_ver_out}"; \
     printf '%s\n' "${dagger_ver_out}" | grep -F "${DAGGER_CLI_VERSION}"
+
+# Terraform is pinned to a concrete stable HashiCorp release. Keep this layer
+# after the Dagger CLI so version bumps only rebuild this install and the cheap
+# final setup.
+ARG TERRAFORM_VERSION=1.16.5
+ARG TERRAFORM_SHA256_AMD64=2bc2fcfff033265c9e02ca0351f01794eb122f62a9b2a49a3294b9e49eaab5e4
+ARG TERRAFORM_SHA256_ARM64=61a50b00485ee4810cf20581ef080fc54d34d666e175c58d9a10501c65c1ccde
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) terraform_arch="amd64"; terraform_sha256="${TERRAFORM_SHA256_AMD64}" ;; \
+        arm64|aarch64) terraform_arch="arm64"; terraform_sha256="${TERRAFORM_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for Terraform: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    terraform_file="terraform_${TERRAFORM_VERSION}_linux_${terraform_arch}.zip"; \
+    curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/${terraform_file}" -o "/tmp/${terraform_file}"; \
+    echo "${terraform_sha256}  /tmp/${terraform_file}" | sha256sum -c -; \
+    mkdir -p /tmp/terraform-cli; \
+    unzip -oq "/tmp/${terraform_file}" -d /tmp/terraform-cli; \
+    install -m 0755 /tmp/terraform-cli/terraform /usr/local/bin/terraform; \
+    rm -rf /tmp/terraform-cli "/tmp/${terraform_file}"; \
+    test -x /usr/local/bin/terraform; \
+    hash -r; \
+    test "$(command -v terraform)" = "/usr/local/bin/terraform"; \
+    terraform_ver_out="$(CHECKPOINT_DISABLE=1 terraform version)"; \
+    printf '%s\n' "${terraform_ver_out}"; \
+    printf '%s\n' "${terraform_ver_out}" | grep -F "Terraform v${TERRAFORM_VERSION}"
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
