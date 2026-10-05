@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Fixture test for the unified update-software skill runner.
 # Drives the shipped runner against a local git fixture for grok, codex,
-# cursor, gcloud-cli, kubectl, dagger, and claude: dirty worktree abort, matching updater dispatch,
+# cursor, gcloud-cli, kubectl, dagger, claude, and terraform: dirty worktree abort, matching updater dispatch,
 # and unchanged-Dockerfile no-update path.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pr_runner="${repo_root}/.codex/skills/update-software/scripts/update-software-pr.sh"
-packages=(grok codex cursor gcloud-cli kubectl dagger claude)
+packages=(grok codex cursor gcloud-cli kubectl dagger claude terraform)
 tmpdir=""
 
 die() {
@@ -50,6 +50,18 @@ require_command grep
 [[ -x "$pr_runner" ]] || die "PR runner is not executable: $pr_runner"
 bash -n "$pr_runner" || die "bash -n failed for update-software-pr.sh"
 
+skill_codex="${repo_root}/.codex/skills/update-software/SKILL.md"
+skill_grok="${repo_root}/.grok/skills/update-software/SKILL.md"
+[[ -f "$skill_codex" ]] || die "codex skill not found: $skill_codex"
+[[ -f "$skill_grok" ]] || die "grok skill not found: $skill_grok"
+grep -Fq -- '- `terraform`' "$skill_codex" \
+    || die "codex skill package list does not name terraform"
+grep -Fq 'PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform' "$pr_runner" \
+    || die "runner usage text does not name terraform"
+grep -Fq 'terraform' "$skill_grok" \
+    || die "grok skill description does not name terraform"
+printf 'ok: skill package list names terraform\n'
+
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/test-update-software.XXXXXX")"
 fixture="${tmpdir}/repo"
 origin="${tmpdir}/origin.git"
@@ -67,6 +79,7 @@ ARG GCLOUD_CLI_VERSION=0.0.0
 ARG KUBECTL_VERSION=0.0.0
 ARG DAGGER_CLI_VERSION=0.0.0
 ARG CLAUDE_CODE_VERSION=0.0.0
+ARG TERRAFORM_VERSION=0.0.0
 EOF
 
 for pkg in "${packages[@]}"; do
