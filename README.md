@@ -365,10 +365,17 @@ report wall time, CPU, and peak memory for a command:
 /usr/bin/time -v command
 ```
 
-Codex is configured to run without its own sandbox inside this image because the
-container is the isolation boundary. Do not mount sensitive host paths into
-containers where Codex runs with broad autonomy. Use the safe Docker socket proxy
-if Docker CLI access is needed.
+Every assistant CLI in this image defaults to its allow-all mode because the
+container is the isolation boundary: Codex runs without its own sandbox and with
+`approval_policy = "never"` (`/etc/codex/config.toml`), Grok Build uses
+`permission_mode = "always-approve"` (`/etc/grok/managed_config.toml`), Claude
+Code gets `permissions.defaultMode = "bypassPermissions"` (with the bypass
+dialog pre-accepted) seeded into `~/.claude/settings.json` when unset, and `gemini` / `agent` / `cursor-agent`
+are wrappers in `/usr/local/lib/agent-defaults/bin` that add
+`--approval-mode=yolo` / `--yolo` unless a mode flag is passed. User config
+still wins for Codex, Grok and Claude Code. Do not mount sensitive host paths
+into containers where these agents run with broad autonomy. Use the safe Docker
+socket proxy if Docker CLI access is needed.
 
 Codex is installed from `codex-package-*` at
 `/usr/local/lib/codex/<version>-<target>`. `/usr/local/bin/codex` points at
