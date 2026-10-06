@@ -536,9 +536,9 @@ RUN set -eux; \
 # only rebuild this install and the cheap final setup. gke-gcloud-auth-plugin
 # is a gcloud component, so it is installed here with `gcloud components
 # install` rather than as a separately pinned CLI.
-ARG GCLOUD_CLI_VERSION=587.0.0
-ARG GCLOUD_CLI_SHA256_AMD64=57df2448d259c654796a3703af8e5b53a02d439715b2034d6bb811efc2d6dd7b
-ARG GCLOUD_CLI_SHA256_ARM64=8349b151da42f07136294da0908624fe8ea16fea200cb2f4412ad081a86e890c
+ARG GCLOUD_CLI_VERSION=588.0.0
+ARG GCLOUD_CLI_SHA256_AMD64=e38ceac43022bb5a4d94d5a4a9c9c51f90f28c910b59a018ae07011e220c4412
+ARG GCLOUD_CLI_SHA256_ARM64=15d0365242d72caebda77647642ae73f68bde10b1f71338c8a704aea200d8ab1
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
