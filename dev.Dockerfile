@@ -159,11 +159,6 @@ RUN groupadd --system devtools \
     && git lfs install --system \
     && update-alternatives --set lua-interpreter /usr/bin/lua5.4 \
     && update-alternatives --set lua-compiler /usr/bin/luac5.4 \
-    && install -d -m 0755 /etc/skel/.codex \
-    && printf '%s\n' \
-        'sandbox_mode = "danger-full-access"' \
-        > /etc/skel/.codex/config.toml \
-    && chmod 0600 /etc/skel/.codex/config.toml \
     && printf '%s\n' \
         'export GOPATH=/go' \
         'export CARGO_HOME=/usr/local/cargo' \
@@ -743,10 +738,24 @@ PROMPT
     fi
 fi
 
-if [[ ! -f "${home_dir}/.codex/config.toml" && -f /etc/skel/.codex/config.toml ]]; then
-    cp /etc/skel/.codex/config.toml "${home_dir}/.codex/config.toml"
-    chown "${uid}:${gid}" "${home_dir}/.codex/config.toml"
-    chmod 0600 "${home_dir}/.codex/config.toml"
+# Claude Code has no system defaults layer below user settings, so seed its
+# default permission mode unless the user already picked one. Pre-accepting the
+# bypass dialog keeps the first launch from stopping on it.
+claude_dir="${home_dir}/.claude"
+claude_settings="${claude_dir}/settings.json"
+if [[ ! -d "${claude_dir}" ]]; then
+    install -d -m 0700 -o "${uid}" -g "${gid}" "${claude_dir}"
+fi
+if [[ ! -s "${claude_settings}" ]]; then
+    install -m 0600 -o "${uid}" -g "${gid}" /dev/null "${claude_settings}"
+    printf '{}\n' > "${claude_settings}"
+fi
+if jq -e '.permissions.defaultMode == null' "${claude_settings}" >/dev/null 2>&1; then
+    if claude_seeded="$(jq '.permissions.defaultMode = "bypassPermissions" | .skipDangerousModePermissionPrompt //= true' "${claude_settings}")"; then
+        printf '%s\n' "${claude_seeded}" > "${claude_settings}"
+    else
+        echo "warning: could not set Claude Code default permission mode in ${claude_settings}" >&2
+    fi
 fi
 
 usermod -aG sudo,linuxbrew,devtools "${user_name}"
@@ -809,6 +818,66 @@ RUN set -eux; \
     test -x /usr/local/bin/codex-code-mode-host; \
     test -x /usr/local/libexec/codex-code-mode-host; \
     install -d -m 1777 /var/lib/codex-sqlite
+
+# Assistant CLIs default to their allow-all mode because the container is the
+# isolation boundary. Codex and Grok read system config that user config still
+# overrides. Gemini only accepts YOLO as a flag (and not on subcommands), and
+# Cursor always writes its approval mode into ~/.cursor, so wrappers ahead of
+# PATH add the flag unless the caller already chose a mode. Claude Code is
+# seeded by dev-entrypoint. The profile.d name sorts last so login shells also
+# put the wrappers ahead of pnpm.
+RUN <<'EOF'
+set -eux
+install -d -m 0755 /etc/codex /etc/grok /usr/local/lib/agent-defaults/bin
+printf '%s\n' \
+    'sandbox_mode = "danger-full-access"' \
+    'approval_policy = "never"' \
+    > /etc/codex/config.toml
+printf '%s\n' \
+    '[ui]' \
+    'permission_mode = "always-approve"' \
+    > /etc/grok/managed_config.toml
+chmod 0644 /etc/codex/config.toml /etc/grok/managed_config.toml
+
+cat > /usr/local/lib/agent-defaults/bin/gemini <<'SCRIPT'
+#!/bin/sh
+real=/usr/local/share/pnpm/bin/gemini
+case "${1:-}" in
+    mcp|extensions|extension|skills|skill|hooks|hook|gemma) exec "${real}" "$@" ;;
+esac
+for arg in "$@"; do
+    case "${arg}" in
+        -y|--yolo|--approval-mode|--approval-mode=*) exec "${real}" "$@" ;;
+    esac
+done
+exec "${real}" --approval-mode=yolo "$@"
+SCRIPT
+
+cat > /usr/local/lib/agent-defaults/bin/cursor-agent <<'SCRIPT'
+#!/bin/sh
+real="/usr/local/bin/$(basename "$0")"
+for arg in "$@"; do
+    case "${arg}" in
+        -f|--force|--yolo|--auto-review) exec "${real}" "$@" ;;
+    esac
+done
+exec "${real}" --yolo "$@"
+SCRIPT
+
+chmod 0755 /usr/local/lib/agent-defaults/bin/gemini /usr/local/lib/agent-defaults/bin/cursor-agent
+ln -sfn cursor-agent /usr/local/lib/agent-defaults/bin/agent
+printf 'export PATH="/usr/local/lib/agent-defaults/bin:${PATH}"\n' > /etc/profile.d/zz-agent-defaults.sh
+chmod 0644 /etc/profile.d/zz-agent-defaults.sh
+export PATH="/usr/local/lib/agent-defaults/bin:${PATH}"
+hash -r
+test "$(command -v gemini)" = /usr/local/lib/agent-defaults/bin/gemini
+test "$(command -v agent)" = /usr/local/lib/agent-defaults/bin/agent
+test "$(command -v cursor-agent)" = /usr/local/lib/agent-defaults/bin/cursor-agent
+gemini --version
+agent --version
+cursor-agent --version
+EOF
+ENV PATH="/usr/local/lib/agent-defaults/bin:${PATH}"
 
 # Runtime-only defaults stay late so simple CLI-experience tweaks do not
 # invalidate the expensive tool installation layers.
