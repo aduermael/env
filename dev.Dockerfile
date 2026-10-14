@@ -595,9 +595,9 @@ RUN set -eux; \
 
 # Dagger CLI tracks the newest v1.0.0-beta.N release. Keep this layer after
 # kubectl so version bumps only rebuild this install and the cheap final setup.
-ARG DAGGER_CLI_VERSION=v1.0.0-beta.16
-ARG DAGGER_CLI_SHA256_AMD64=08d4d1485f0eb4a81fed28a1f3635deb63eae7c24831e0b53825257bde11126c
-ARG DAGGER_CLI_SHA256_ARM64=0e13ac0e161d33a134699b65372aea61d358c7642ecfa0642712f4eecf730e73
+ARG DAGGER_CLI_VERSION=v1.0.0-beta.17
+ARG DAGGER_CLI_SHA256_AMD64=ef89fc09462050ac69d103a1d7bed56c7ae0d7842e90e548c272a85a5856cae0
+ARG DAGGER_CLI_SHA256_ARM64=64b3e249118cb07d33e3dd62ac7dd8108bea8b5d156c6bc441dfd737ec5b9cdf
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
