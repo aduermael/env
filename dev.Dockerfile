@@ -509,9 +509,9 @@ RUN set -eux; \
     test "$(codex --version)" = "codex-cli ${codex_version}"; \
     test -x /usr/local/bin/codex-code-mode-host
 
-ARG CURSOR_CLI_VERSION=2026.10.01-e373342
-ARG CURSOR_CLI_SHA256_AMD64=a79726c6e644520e993970be4c45775a6889802b67abe461a677a53219ae28e8
-ARG CURSOR_CLI_SHA256_ARM64=785c5f6bf2a60eb1121e27ed8c14f5ee07ed1b5b6692324f2d9a997238245eb5
+ARG CURSOR_CLI_VERSION=2026.10.14-0f9edde
+ARG CURSOR_CLI_SHA256_AMD64=74fac931fe3578980d070701872b7dab54eb87a9abf9b6e2e6be19beeb9167a7
+ARG CURSOR_CLI_SHA256_ARM64=28028e8adb8266c8b7c00d11950765fbf9a3b9cac77a98b7c92b172646b35f4b
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
