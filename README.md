@@ -165,6 +165,24 @@ To pin a specific release instead:
 scripts/update-claude.sh 2.1.238
 ```
 
+### Update Playwright browser dependencies in the dev image
+
+The image runs `playwright install-deps chromium webkit` at the npm
+`playwright` version pinned in `dev.Dockerfile`, so the Chromium and WebKit
+system libraries match that release. The browsers themselves are not in the
+image; they stay in the `~/.cache/ms-playwright` shared from the host. To
+update the pin to the latest npm `latest` release:
+
+```sh
+scripts/update-playwright.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-playwright.sh 1.58.2
+```
+
 ## CLI Reference
 
 ```sh

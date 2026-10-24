@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Fixture test for the unified update-software skill runner.
 # Drives the shipped runner against a local git fixture for grok, codex,
-# cursor, gcloud-cli, kubectl, dagger, claude, and terraform: dirty worktree abort, matching updater dispatch,
+# cursor, gcloud-cli, kubectl, dagger, claude, terraform, and playwright: dirty worktree abort, matching updater dispatch,
 # and unchanged-Dockerfile no-update path.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pr_runner="${repo_root}/.codex/skills/update-software/scripts/update-software-pr.sh"
-packages=(grok codex cursor gcloud-cli kubectl dagger claude terraform)
+packages=(grok codex cursor gcloud-cli kubectl dagger claude terraform playwright)
 tmpdir=""
 
 die() {
@@ -56,11 +56,15 @@ skill_grok="${repo_root}/.grok/skills/update-software/SKILL.md"
 [[ -f "$skill_grok" ]] || die "grok skill not found: $skill_grok"
 grep -Fq -- '- `terraform`' "$skill_codex" \
     || die "codex skill package list does not name terraform"
-grep -Fq 'PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform' "$pr_runner" \
-    || die "runner usage text does not name terraform"
+grep -Fq -- '- `playwright`' "$skill_codex" \
+    || die "codex skill package list does not name playwright"
+grep -Fq 'PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright' "$pr_runner" \
+    || die "runner usage text does not name terraform and playwright"
 grep -Fq 'terraform' "$skill_grok" \
     || die "grok skill description does not name terraform"
-printf 'ok: skill package list names terraform\n'
+grep -Fq 'playwright' "$skill_grok" \
+    || die "grok skill description does not name playwright"
+printf 'ok: skill package list names terraform and playwright\n'
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/test-update-software.XXXXXX")"
 fixture="${tmpdir}/repo"
@@ -80,6 +84,7 @@ ARG KUBECTL_VERSION=0.0.0
 ARG DAGGER_CLI_VERSION=0.0.0
 ARG CLAUDE_CODE_VERSION=0.0.0
 ARG TERRAFORM_VERSION=0.0.0
+ARG PLAYWRIGHT_VERSION=0.0.0
 EOF
 
 for pkg in "${packages[@]}"; do
