@@ -432,6 +432,13 @@ RUN set -eux; \
     printf '%s\n' "${blender_ver_out}" | grep -F "Blender ${blender_version}"; \
     blender --factory-startup -b --python-exit-code 1 --python-expr "import bpy; print(bpy.app.version_string)"
 
+# OS libraries for the Playwright browsers shared from the host's ~/.cache/ms-playwright.
+# Keep the version in step with Houston's tools/design/web-deps.json.
+ARG PLAYWRIGHT_VERSION=1.58.2
+RUN set -eux; \
+    npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium webkit; \
+    rm -rf /var/lib/apt/lists/* /root/.npm
+
 # Fast-moving assistant CLIs stay after the expensive language runtimes and Homebrew
 # layers. Version bumps here should only rebuild these layers and cheap final setup.
 ARG GEMINI_CLI_VERSION=0.56.0
