@@ -434,7 +434,7 @@ RUN set -eux; \
 
 # OS libraries for the Playwright browsers shared from the host's ~/.cache/ms-playwright.
 # Update with scripts/update-playwright.sh.
-ARG PLAYWRIGHT_VERSION=1.58.2
+ARG PLAYWRIGHT_VERSION=1.64.1
 RUN set -eux; \
     npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium webkit; \
     rm -rf /var/lib/apt/lists/* /root/.npm
