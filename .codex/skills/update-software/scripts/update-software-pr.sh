@@ -23,7 +23,7 @@ usage() {
     cat <<'EOF'
 Usage: update-software-pr.sh PACKAGE [latest|VERSION|TAG]
 
-PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform
+PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright
 
 Runs that package's ./scripts/update-*.sh from a fresh origin/main worktree.
 If dev.Dockerfile changes, creates a branch, pushes it, and opens a PR.
@@ -80,9 +80,15 @@ configure_package() {
             display_name="Claude Code CLI"
             checksum_blurb="update the Claude Code CLI version pin"
             ;;
+        playwright)
+            updater_rel="scripts/update-playwright.sh"
+            version_arg="PLAYWRIGHT_VERSION"
+            display_name="Playwright browser dependencies"
+            checksum_blurb="install the Chromium and WebKit system libraries this Playwright release lists"
+            ;;
         *)
             usage >&2
-            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, or terraform)"
+            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, or playwright)"
             ;;
     esac
     package="$1"

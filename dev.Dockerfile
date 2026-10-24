@@ -433,7 +433,7 @@ RUN set -eux; \
     blender --factory-startup -b --python-exit-code 1 --python-expr "import bpy; print(bpy.app.version_string)"
 
 # OS libraries for the Playwright browsers shared from the host's ~/.cache/ms-playwright.
-# Keep the version in step with Houston's tools/design/web-deps.json.
+# Update with scripts/update-playwright.sh.
 ARG PLAYWRIGHT_VERSION=1.58.2
 RUN set -eux; \
     npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium webkit; \
