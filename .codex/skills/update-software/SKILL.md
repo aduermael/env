@@ -1,6 +1,6 @@
 ---
 name: update-software
-description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Claude Code CLI, Google Cloud CLI (gcloud), kubectl, Dagger CLI, Terraform, or Playwright release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
+description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Claude Code CLI, Google Cloud CLI (gcloud), GitHub CLI (gh), kubectl, Dagger CLI, Terraform, or Playwright release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
 ---
 
 # Update software pins
@@ -18,6 +18,7 @@ Supported `PACKAGE` values:
 - `terraform` — `./scripts/update-terraform.sh` (without a release argument, tracks the newest stable HashiCorp Terraform release)
 - `claude` — `./scripts/update-claude.sh` (without a release argument, tracks the `@anthropic-ai/claude-code` NPM `latest` dist-tag)
 - `playwright` — `./scripts/update-playwright.sh` (without a release argument, tracks the `playwright` NPM `latest` dist-tag; the image installs that release's Chromium and WebKit system libraries)
+- `gh` — `./scripts/update-gh.sh` (without a release argument, tracks the newest stable GitHub CLI release)
 
 ## Workflow
 
@@ -39,6 +40,7 @@ Pass one optional release argument only when the user requested a specific versi
 ./.codex/skills/update-software/scripts/update-software-pr.sh terraform 1.16.5
 ./.codex/skills/update-software/scripts/update-software-pr.sh claude 2.1.238
 ./.codex/skills/update-software/scripts/update-software-pr.sh playwright 1.58.2
+./.codex/skills/update-software/scripts/update-software-pr.sh gh 2.98.0
 ```
 
 The runner enforces the required behavior:

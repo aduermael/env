@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Structural + network smoke test for the GitHub CLI pin.
+# Reads the shipped dev.Dockerfile (not a copy) and asserts a concrete
+# GitHub CLI release is installed and that the image build itself
+# runs `gh --version`.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+dockerfile="${DOCKERFILE:-${repo_root}/dev.Dockerfile}"
+
+die() {
+    printf 'FAIL: %s\n' "$*" >&2
+    exit 1
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+sha256_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+    else
+        die "required command not found: sha256sum or shasum"
+    fi
+}
+
+arg_value() {
+    local name="$1"
+    local line
+    line="$(grep -E "^ARG ${name}=" "$dockerfile" || true)"
+    [[ -n "$line" ]] || die "missing ARG ${name}= in ${dockerfile}"
+    printf '%s\n' "${line#ARG ${name}=}"
+}
+
+require_command curl
+require_command grep
+require_command awk
+
+[[ -f "$dockerfile" ]] || die "Dockerfile not found: $dockerfile"
+
+# --- Dockerfile must install a concrete GitHub CLI release ---
+version="$(arg_value GITHUB_CLI_VERSION)"
+sha_amd64="$(arg_value GITHUB_CLI_SHA256_AMD64)"
+sha_arm64="$(arg_value GITHUB_CLI_SHA256_ARM64)"
+
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "GITHUB_CLI_VERSION must be X.Y.Z, got: $version"
+[[ ${#sha_amd64} -eq 64 ]] || die "amd64 SHA must be 64 hex chars"
+[[ ${#sha_arm64} -eq 64 ]] || die "arm64 SHA must be 64 hex chars"
+[[ "$sha_amd64" =~ ^[0-9a-f]{64}$ ]] || die "amd64 SHA must be lowercase hex"
+[[ "$sha_arm64" =~ ^[0-9a-f]{64}$ ]] || die "arm64 SHA must be lowercase hex"
+
+grep -Fq 'gh_file="gh_${GITHUB_CLI_VERSION}_linux_${gh_arch}.tar.gz"' "$dockerfile" \
+    || die "Dockerfile does not download gh_\${GITHUB_CLI_VERSION}_linux_\${gh_arch}.tar.gz"
+grep -Fq 'https://github.com/cli/cli/releases/download/v${GITHUB_CLI_VERSION}/${gh_file}' "$dockerfile" \
+    || die "Dockerfile does not fetch GitHub CLI from github.com/cli/cli/releases"
+grep -Fq 'install -m 0755 /tmp/gh/bin/gh /usr/local/bin/gh' "$dockerfile" \
+    || die "Dockerfile does not install /usr/local/bin/gh"
+grep -Fq 'gh --version' "$dockerfile" \
+    || die "Dockerfile does not invoke gh --version during the image build"
+
+# Live checksums for the pinned versioned archives (the files the Dockerfile fetches).
+verify_archive() {
+    local arch="$1"
+    local expected_sha="$2"
+    local file="gh_${version}_linux_${arch}.tar.gz"
+    local url="https://github.com/cli/cli/releases/download/v${version}/${file}"
+    local actual
+
+    printf 'download: %s\n' "$file"
+    actual="$(curl -fsSL --retry 3 --retry-delay 2 "$url" | sha256_stream)"
+    [[ "$actual" == "$expected_sha" ]] || die "${file}: digest mismatch (expected ${expected_sha}, got ${actual})"
+    printf 'ok: %s digest\n' "$file"
+}
+
+verify_archive "amd64" "$sha_amd64"
+verify_archive "arm64" "$sha_arm64"
+
+printf 'ok: GitHub CLI %s is pinned\n' "$version"
+printf 'ALL CHECKS PASSED\n'
