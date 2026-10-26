@@ -304,9 +304,9 @@ RUN groupadd --system linuxbrew \
     && chmod -R g+rwX /home/linuxbrew/.linuxbrew \
     && find /home/linuxbrew/.linuxbrew -type d -exec chmod g+s {} +
 
-ARG GITHUB_CLI_VERSION=2.98.0
-ARG GITHUB_CLI_SHA256_AMD64=3b8ac6b30336802fc1a858d7c084e11cdf24ac1a761ca90b68022d7d729208de
-ARG GITHUB_CLI_SHA256_ARM64=cf689084f3a3618f7eae4a2420d335d74626d65f5e594b9828d125d69f800d86
+ARG GITHUB_CLI_VERSION=2.103.2
+ARG GITHUB_CLI_SHA256_AMD64=62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8
+ARG GITHUB_CLI_SHA256_ARM64=4c3e99a50bd8b181a3fe9d69b25dd978bac768148d88f01507c6b4d1ef61a443
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
