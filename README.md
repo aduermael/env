@@ -183,6 +183,21 @@ To pin a specific release instead:
 scripts/update-playwright.sh 1.58.2
 ```
 
+### Update GitHub CLI in the dev image
+
+GitHub CLI (`gh`) is pinned in `dev.Dockerfile` with checksums for both Linux
+image architectures. To update it to the latest stable release:
+
+```sh
+scripts/update-gh.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-gh.sh 2.98.0
+```
+
 ## CLI Reference
 
 ```sh
