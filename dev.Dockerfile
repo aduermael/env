@@ -380,7 +380,7 @@ RUN set -eux; \
     find "${BAZELISK_HOME}" -type d -exec chmod g+s {} +
 
 # Blender is large and slow-moving. Keep it with the expensive runtimes so
-# assistant CLI, gcloud, kubectl, Dagger CLI, and Terraform bumps do not rebuild it. Upstream publishes
+# assistant CLI, gcloud, kubectl, Dagger CLI, Terraform, and herdr bumps do not rebuild it. Upstream publishes
 # linux-x64 only; arm64 uses an unofficial portable Rocky Linux 8 build.
 ARG BLENDER_VERSION=5.2.1
 ARG BLENDER_SHA256_AMD64=a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9
@@ -653,6 +653,32 @@ RUN set -eux; \
     terraform_ver_out="$(CHECKPOINT_DISABLE=1 terraform version)"; \
     printf '%s\n' "${terraform_ver_out}"; \
     printf '%s\n' "${terraform_ver_out}" | grep -F "Terraform v${TERRAFORM_VERSION}"
+
+# herdr is pinned to a concrete stable release. Keep this layer after
+# Terraform so version bumps only rebuild this install and the cheap final
+# setup. The archives are the static Linux binaries named by the herdr.dev
+# release manifest.
+ARG HERDR_VERSION=0.9.5
+ARG HERDR_SHA256_AMD64=14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d
+ARG HERDR_SHA256_ARM64=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) herdr_target="linux-x86_64"; herdr_sha256="${HERDR_SHA256_AMD64}" ;; \
+        arm64|aarch64) herdr_target="linux-aarch64"; herdr_sha256="${HERDR_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for herdr: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    herdr_file="herdr-${herdr_target}"; \
+    curl -fsSL "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/${herdr_file}" -o "/tmp/${herdr_file}"; \
+    echo "${herdr_sha256}  /tmp/${herdr_file}" | sha256sum -c -; \
+    install -m 0755 "/tmp/${herdr_file}" /usr/local/bin/herdr; \
+    rm "/tmp/${herdr_file}"; \
+    test -x /usr/local/bin/herdr; \
+    hash -r; \
+    test "$(command -v herdr)" = "/usr/local/bin/herdr"; \
+    herdr_ver_out="$(herdr --version)"; \
+    printf '%s\n' "${herdr_ver_out}"; \
+    printf '%s\n' "${herdr_ver_out}" | grep -Fx "herdr ${HERDR_VERSION}"
 
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
