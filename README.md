@@ -14,9 +14,15 @@ devenv setup
 After setup, a new zsh session should have these commands:
 
 ```sh
-dev
+dev up
+dev down
 devenv down
 ```
+
+`dev up` starts the dev container for the current git worktree and registers
+it as a saved Herdr machine. Work happens in Herdr panes on that machine. `dev
+down` removes that worktree's container. `devenv down` removes every managed
+container.
 
 ## Build the CLI
 
@@ -218,7 +224,8 @@ scripts/update-herdr.sh 0.9.5
 
 ```sh
 devenv setup [flags]
-devenv run [flags] [--] [command [args...]]
+devenv up [flags]
+devenv stop [flags]
 devenv down [flags]
 ```
 
@@ -239,13 +246,22 @@ Useful setup flags:
 - `--zshrc path`: zshrc file to update, default `~/.zshrc`.
 - `--skip-build`: skip rebuilding the Docker image.
 
-`devenv run` starts the dev container in the current directory. With no command,
-it opens the image default shell. With a command, it runs that command in the dev
-container. The generated zsh commands call `devenv run --quiet`, so normal
-preflight checks stay silent unless something fails.
+`devenv up` starts the detached dev container for the git worktree that
+contains the current directory, waits until it answers SSH, saves it as a
+Herdr machine, and returns. It does not open a shell and does not run a
+command: the container is a Herdr machine, and shells and agents are Herdr
+panes on it. Outside a git worktree it fails. The generated `dev up` calls
+`devenv up --quiet`, so normal preflight checks stay silent unless something
+fails. Lines that name a command to run are printed regardless.
 
-`devenv down` removes managed runtime containers, proxy bridge, and proxy
-network. It keeps `~/.devenv` state unless `--delete-data` is passed.
+`devenv stop` removes the current worktree's container and nothing else. The
+generated `dev down` calls it. With no container running it succeeds.
+
+`devenv down` removes every managed runtime container, including the proxy
+bridge and proxy network. It keeps `~/.devenv` state unless `--delete-data` is
+passed.
+
+`devenv run` no longer exists.
 
 ## `devenv setup`
 
@@ -290,14 +306,51 @@ case ":$PATH:" in
 esac
 
 dev() {
-  devenv run --quiet -- "$@"
+  case "$1" in
+    up) command devenv up --quiet ;;
+    down) command devenv stop --quiet ;;
+    *) echo "usage: dev up|down" >&2; return 2 ;;
+  esac
 }
 # <<< devenv <<<
 ```
 
-`dev` opens an interactive shell in the dev container with the current directory
-mounted at `/workspace`. Arguments passed to `dev` are forwarded to `devenv run`
-so callers can run a specific command in the same container environment.
+`dev` accepts only `up` and `down`. Anything else prints usage and does not
+start a container.
+
+## Herdr machines
+
+Each git worktree has at most one dev container, and that container is a
+saved Herdr machine. `dev up` from anywhere inside a worktree starts it. The
+same worktree keeps the same machine the next time `dev up` starts it: the
+SSH alias `devenv-<id>`, the loopback port, the host key, and the remote
+session `default` are fixed per worktree and stored in
+`~/.devenv/herdr/worktrees.json`.
+
+- The machine id is `<repo>-<worktree>-<6 random chars>`, for example
+  `env-root-a1b2c3` for the main checkout or `env-feature-c4d5e6` for
+  `<repo>/worktrees/feature`. The Docker container and the SSH alias are
+  `devenv-<id>`.
+- The repository root (the parent of the main `.git`) is mounted at
+  `/workspace` and, when the path differs, at the same absolute path it has on
+  the Mac. Herdr panes start at `/workspace` for the main checkout and at
+  `/workspace/worktrees/<name>` for a linked worktree.
+- Linked worktrees must live at `<repo>/worktrees/<name>`. `dev up` elsewhere
+  fails and names that directory. Add `worktrees/` to `.git/info/exclude` so
+  the main checkout does not list them as untracked.
+- A submodule checkout uses the enclosing worktree's machine.
+- `sshd` is the container's main process. Closing the Herdr client leaves the
+  server and its panes running. `dev down` removes the container; the Herdr
+  profile, SSH alias, registry row, host key, and Herdr volume stay, and the
+  next `dev up` brings the same machine back.
+- When `herdr` is not on the Mac `PATH`, `dev up` still succeeds and prints
+  the `herdr machine add` line to run later.
+- Rebuilding the image with `devenv setup` does not restart a running
+  workspace container. The new image is used after `dev down` and `dev up`.
+- `devenv down --delete-data` removes the keys, the registry, the Herdr
+  volumes, and the managed include in `~/.ssh/config`. Saved Herdr profiles
+  then point at nothing; remove them with `herdr machine remove <id>` after
+  reading `herdr machine list`.
 
 ## Host State Layout
 
@@ -314,10 +367,25 @@ volume. The default layout is:
   ssh/
     id_ed25519
     id_ed25519.pub
+  herdr/
+    ssh_host_ed25519_key
+    ssh_host_ed25519_key.pub
+    id_ed25519.pub
+    worktrees.json
+    worktrees.lock
+    ssh_config
+    known_hosts
   run/
     docker.sock
     proxy-bridge.pid
 ```
+
+The Herdr client private key is `~/.ssh/devenv_herdr_ed25519`, outside
+`~/.devenv`, because `~/.devenv` is mounted into every container. Only its
+public half is copied to `~/.devenv/herdr/id_ed25519.pub`. `~/.ssh/config`
+gets a managed include block at the top that points at
+`~/.devenv/herdr/ssh_config`, where each worktree's `devenv-<id>` alias is
+rendered.
 
 Mount contract:
 
@@ -336,7 +404,12 @@ Mount contract:
 - Dev containers join the managed proxy Docker network and receive
   `DOCKER_HOST=tcp://devenv-dockerproxy:2375`, avoiding direct host Docker
   socket mounts.
-- The current working directory is mounted at `/workspace`.
+- The repository root of the current git worktree is mounted at `/workspace`.
+- `~/.devenv/home/.config/herdr` and `~/.devenv/home/.local/state/herdr` are
+  symlinks onto the per-worktree Herdr volume (`devenv-herdr-<id>`, mounted at
+  `/var/lib/devenv/herdr`). Herdr config, sockets, session state, and logs are
+  per worktree. Other tool config under `~/.config`, such as `gh`, stays
+  shared. `XDG_CONFIG_HOME` is never set.
 
 `~/.devenv/gitconfig` should include:
 
@@ -351,12 +424,15 @@ key at `~/.devenv/ssh/id_ed25519.pub` to GitHub or another Git host.
 
 ## GitHub CLI (`gh`)
 
-Run GitHub CLI commands through the `dev` launcher from the host. To authenticate
-with GitHub:
+Run GitHub CLI commands in a Herdr pane on the worktree's machine after
+`dev up`. To authenticate with GitHub, run this in a pane:
 
 ```sh
-dev gh auth login --hostname github.com --git-protocol ssh --web
+gh auth login --hostname github.com --git-protocol ssh --web
 ```
+
+`gh` keeps its state in the shared `~/.devenv/home/.config/gh`, so one login
+covers every worktree.
 
 Follow the instructions printed by `gh`. If your env SSH key is already uploaded
 on GitHub, skip the SSH key upload step.
@@ -389,9 +465,17 @@ containers exist should succeed.
 - Do not delete `~/.devenv/home` or tool state such as `~/.codex`.
 - Do not remove the Codex SQLite Docker volume unless `--delete-data` is passed.
 - Do not delete `~/.devenv/ssh` or its keypair.
+- Do not delete `~/.devenv/herdr`: the host key, the worktree registry, and
+  the rendered SSH config are what keep each worktree on the same Herdr
+  machine. Do not remove the managed include in `~/.ssh/config`.
+- Do not remove the per-worktree Herdr volumes or saved Herdr profiles. Saved
+  machines go offline and come back on the next `dev up`.
 - Do not remove the generated zshrc block.
 - Do not remove the dev image unless a separate explicit prune command or flag
   is added.
+
+`devenv down --delete-data` is the only command that removes `~/.devenv`, the
+Herdr volumes, and the include block.
 
 The next `devenv setup` or launcher command should be able to recreate runtime
 containers without forcing the user to re-authenticate tools.
@@ -400,7 +484,7 @@ containers without forcing the user to re-authenticate tools.
 
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
-Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), herdr, Google Cloud CLI (`gcloud`),
+Git 2.55.0, Git LFS, OpenSSH client and server, tini, GitHub CLI (`gh`), herdr, Google Cloud CLI (`gcloud`),
 kubectl, Dagger CLI (`dagger`), `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
@@ -475,11 +559,20 @@ Enable relative worktree links before creating worktrees:
 git config --global worktree.useRelativePaths true
 ```
 
-The container sees the checkout at `/workspace`, while the host usually sees the
-same files at a different absolute path. Git worktrees store links between the
-main checkout and linked worktrees, so absolute links written in one environment
-may not exist in the other. Relative links keep the worktrees usable as long as
-the repository and its worktree directories move together.
+Linked worktrees must live at `<repo>/worktrees/<name>`:
+
+```sh
+git worktree add worktrees/feature -b feature
+cd worktrees/feature
+dev up
+```
+
+The container sees the repository root at `/workspace` and, when the path
+differs, at the same absolute path it has on the Mac. One mount covers `.git`,
+the main checkout, and every `worktrees/<name>` checkout, so both relative and
+absolute worktree links resolve inside the container. Relative links are still
+preferred: they keep the worktrees usable as long as the repository and its
+worktree directories move together.
 
 Existing absolute-path worktrees should be recreated or repaired with Git 2.48.0
 or newer:

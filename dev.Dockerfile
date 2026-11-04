@@ -680,6 +680,20 @@ RUN set -eux; \
     printf '%s\n' "${herdr_ver_out}"; \
     printf '%s\n' "${herdr_ver_out}" | grep -Fx "herdr ${HERDR_VERSION}"
 
+# devenv runs each container as a Herdr machine: sshd is the main process
+# and tini is PID 1 in front of the entrypoint. The host keys the package
+# generates at build time are deleted; dev-entrypoint installs the per-user
+# host key from /devenv/herdr on every start so a recreated container keeps
+# its identity.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        openssh-server \
+        tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/ssh/ssh_host_* \
+    && test -x /usr/sbin/sshd \
+    && test -x /usr/bin/tini
+
 RUN echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev-users \
     && chmod 0440 /etc/sudoers.d/dev-users \
     && install -d -m 0755 /home/dev \
@@ -692,7 +706,8 @@ cat > /usr/local/bin/dev-entrypoint <<'SCRIPT'
 set -euo pipefail
 
 if [[ "$(id -u)" != "0" ]]; then
-    exec "$@"
+    echo "dev-entrypoint must start as root; devenv starts this image with its default user" >&2
+    exit 1
 fi
 
 workspace="${DEV_WORKSPACE:-/workspace}"
@@ -830,14 +845,159 @@ if [[ "${codex_logs_size}" -gt 1073741824 ]]; then
     mv -f "${codex_logs}-shm" "${codex_logs}-shm.stale-${stamp}" 2>/dev/null || true
 fi
 
-export HOME="${home_dir}"
-export CODEX_HOME="${home_dir}/.codex"
-export CODEX_SQLITE_HOME="${sqlite_home}"
-export USER="${user_name}"
-export LOGNAME="${user_name}"
-export SHELL=/bin/bash
+# Serve mode. The container is a Herdr machine: sshd is the main process and
+# the Herdr server runs as the container user. There is no shell to exec.
+devenv_dir="${DEVENV_DIR:-/devenv}"
+pane_cwd="${DEVENV_PANE_CWD:-${workspace}}"
+herdr_volume="${DEVENV_HERDR_VOLUME:-/var/lib/devenv/herdr}"
+image_path="${PATH}"
 
-exec gosu "${user_name}" "$@"
+for required in \
+    "${devenv_dir}/herdr/ssh_host_ed25519_key" \
+    "${devenv_dir}/herdr/ssh_host_ed25519_key.pub" \
+    "${devenv_dir}/herdr/id_ed25519.pub"; do
+    if [[ ! -f "${required}" ]]; then
+        echo "missing ${required}; start this container with 'dev up' so devenv mounts its Herdr keys" >&2
+        exit 1
+    fi
+done
+
+# sshd runs with UsePAM no and refuses a locked account itself. useradd wrote
+# '!' into the shadow entry; '*' has no valid hash, so password login stays
+# impossible. Any other value, such as a real hash on a pre-existing user,
+# is left alone.
+shadow_password="$(getent shadow "${user_name}" | cut -d: -f2)"
+if [[ "${shadow_password}" == '!'* ]]; then
+    usermod -p '*' "${user_name}"
+fi
+
+# Keys live on /run, a real Linux filesystem, so sshd's owner and mode checks
+# pass. The macOS bind mount of ~/.devenv is the wrong place for them. They
+# are copied on every start, so a recreated container presents the same key.
+install -d -m 0755 -o root -g root /run/devenv /run/sshd
+install -m 0600 -o root -g root "${devenv_dir}/herdr/ssh_host_ed25519_key" /run/devenv/ssh_host_ed25519_key
+install -m 0644 -o root -g root "${devenv_dir}/herdr/ssh_host_ed25519_key.pub" /run/devenv/ssh_host_ed25519_key.pub
+install -m 0600 -o "${uid}" -g "${gid}" "${devenv_dir}/herdr/id_ed25519.pub" /run/devenv/authorized_keys
+
+# OpenSSH 9.2 keeps only the first SetEnv directive, so every variable goes
+# on that one line. This is what an SSH-started herdr server inherits.
+session_env="HOME=${home_dir} USER=${user_name} LOGNAME=${user_name} SHELL=/bin/bash"
+session_env+=" CODEX_HOME=${home_dir}/.codex CODEX_SQLITE_HOME=${sqlite_home}"
+for name in DOCKER_HOST GIT_CONFIG_GLOBAL; do
+    if [[ -n "${!name:-}" ]]; then
+        session_env+=" ${name}=${!name}"
+    fi
+done
+session_env+=" PATH=${image_path}"
+cat > /etc/ssh/sshd_config.d/devenv.conf <<SSHD_CONF
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+UseDNS no
+UsePAM no
+PrintMotd no
+PrintLastLog no
+Banner none
+PermitUserRC no
+PermitUserEnvironment no
+AllowUsers ${user_name}
+AuthorizedKeysFile /run/devenv/authorized_keys
+HostKey /run/devenv/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+SetEnv ${session_env}
+SSHD_CONF
+/usr/sbin/sshd -t
+
+# Herdr config, sockets, and state live on the per-worktree volume. The home
+# is shared by every container, so a symlink there resolves per container.
+# XDG_CONFIG_HOME is never set: gh, git, and other XDG-aware tools in every
+# pane would follow it onto the volume.
+install -d -m 0755 "${herdr_volume}"
+chown "${uid}:${gid}" "${herdr_volume}"
+install -d -m 0700 -o "${uid}" -g "${gid}" "${herdr_volume}/herdr" "${herdr_volume}/state"
+
+ensure_user_dir() {
+    if [[ ! -d "$1" ]]; then
+        install -d -m 0755 -o "${uid}" -g "${gid}" "$1"
+    fi
+}
+
+link_herdr_dir() {
+    local link="$1" target="$2"
+    if [[ -L "${link}" ]]; then
+        if [[ "$(readlink "${link}")" == "${target}" ]]; then
+            return 0
+        fi
+        rm -f "${link}"
+    elif [[ -e "${link}" ]]; then
+        local aside="${link}.pre-devenv-$(date -u +%Y%m%dT%H%M%SZ)"
+        echo "warning: moving ${link} to ${aside}; Herdr state now lives on the per-worktree volume" >&2
+        mv "${link}" "${aside}"
+    fi
+    ln -s "${target}" "${link}"
+    chown -h "${uid}:${gid}" "${link}"
+}
+
+ensure_user_dir "${home_dir}/.config"
+link_herdr_dir "${home_dir}/.config/herdr" "${herdr_volume}/herdr"
+ensure_user_dir "${home_dir}/.local"
+ensure_user_dir "${home_dir}/.local/state"
+link_herdr_dir "${home_dir}/.local/state/herdr" "${herdr_volume}/state"
+
+# Herdr's default new_cwd is "follow", which starts the first pane in $HOME.
+# A fixed path puts it in the worktree. The file is written once; the server
+# updates it afterwards.
+herdr_config="${herdr_volume}/herdr/config.toml"
+if [[ ! -f "${herdr_config}" ]]; then
+    install -m 0644 -o "${uid}" -g "${gid}" /dev/null "${herdr_config}"
+    printf 'onboarding = false\n\n[terminal]\nnew_cwd = "%s"\n' "${pane_cwd}" > "${herdr_config}"
+fi
+
+# herdr server stays in the foreground. The loop restarts it when it dies
+# and stays out of the way when a client already started one over SSH:
+# a second start fails with "already running". setsid makes the server its
+# own session leader, which is how Herdr tells a server that survives SSH
+# disconnects from one that would get SIGHUP; without it, machine add asks
+# to restart the server. -w keeps the loop waiting on the server's exit.
+herdr_env=(
+    "HOME=${home_dir}"
+    "USER=${user_name}"
+    "LOGNAME=${user_name}"
+    "SHELL=/bin/bash"
+    "CODEX_HOME=${home_dir}/.codex"
+    "CODEX_SQLITE_HOME=${sqlite_home}"
+    "PATH=${image_path}"
+)
+for name in DOCKER_HOST GIT_CONFIG_GLOBAL; do
+    if [[ -n "${!name:-}" ]]; then
+        herdr_env+=("${name}=${!name}")
+    fi
+done
+
+herdr_server_running() {
+    gosu "${user_name}" env "${herdr_env[@]}" herdr status server 2>/dev/null | grep -q '^status: running'
+}
+
+supervise_herdr_server() {
+    local status
+    while true; do
+        if herdr_server_running; then
+            sleep 10
+            continue
+        fi
+        echo "devenv: starting herdr server" >&2
+        status=0
+        setsid -w gosu "${user_name}" env "${herdr_env[@]}" herdr server </dev/null || status=$?
+        echo "devenv: herdr server exited with status ${status}" >&2
+        sleep 3
+    done
+}
+
+cd "${pane_cwd}" 2>/dev/null || cd /
+supervise_herdr_server &
+
+exec /usr/sbin/sshd -D -e
 SCRIPT
 chmod 0755 /usr/local/bin/dev-entrypoint
 EOF
@@ -919,5 +1079,4 @@ ENV PGDATA=/workspace/.postgres-data \
     TERM=xterm-256color
 
 WORKDIR /workspace
-ENTRYPOINT ["dev-entrypoint"]
-CMD ["bash"]
+ENTRYPOINT ["tini", "--", "/usr/local/bin/dev-entrypoint"]
