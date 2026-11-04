@@ -680,6 +680,36 @@ RUN set -eux; \
     printf '%s\n' "${herdr_ver_out}"; \
     printf '%s\n' "${herdr_ver_out}" | grep -Fx "herdr ${HERDR_VERSION}"
 
+# herdr-core (hc) is the server the Herdr desktop app talks to. It is pinned
+# the same way, right after herdr. The release manifest at
+# releases.herdr.dev/core/<version>/manifest.json publishes the archive
+# digests. The archive holds the static binary plus two license files; only
+# the binary is installed, with the hc symlink beside it.
+ARG HERDR_CORE_VERSION=0.1.17
+ARG HERDR_CORE_SHA256_AMD64=82ec44043f6894bfdb716b979b87cda43fd7fa46b0104e7b7bd93e64d1a9b877
+ARG HERDR_CORE_SHA256_ARM64=3a37a454ec63494cf4306db26481fe9db96673d888723701d24f8a992ae8ab8c
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) herdr_core_target="linux-x86_64"; herdr_core_sha256="${HERDR_CORE_SHA256_AMD64}" ;; \
+        arm64|aarch64) herdr_core_target="linux-aarch64"; herdr_core_sha256="${HERDR_CORE_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for herdr-core: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    herdr_core_file="herdr-core-${herdr_core_target}.tar.gz"; \
+    curl -fsSL "https://releases.herdr.dev/core/${HERDR_CORE_VERSION}/${herdr_core_file}" -o "/tmp/${herdr_core_file}"; \
+    echo "${herdr_core_sha256}  /tmp/${herdr_core_file}" | sha256sum -c -; \
+    mkdir -p /tmp/herdr-core; \
+    tar -xzf "/tmp/${herdr_core_file}" -C /tmp/herdr-core herdr-core; \
+    install -m 0755 /tmp/herdr-core/herdr-core /usr/local/bin/herdr-core; \
+    ln -sfn herdr-core /usr/local/bin/hc; \
+    rm -rf /tmp/herdr-core "/tmp/${herdr_core_file}"; \
+    test -x /usr/local/bin/herdr-core; \
+    hash -r; \
+    test "$(command -v hc)" = "/usr/local/bin/hc"; \
+    herdr_core_ver_out="$(hc --version)"; \
+    printf '%s\n' "${herdr_core_ver_out}"; \
+    printf '%s\n' "${herdr_core_ver_out}" | grep -Fx "hc ${HERDR_CORE_VERSION}"
+
 # devenv runs each container as a Herdr machine: sshd is the main process
 # and tini is PID 1 in front of the entrypoint. The host keys the package
 # generates at build time are deleted; dev-entrypoint installs the per-user
@@ -915,7 +945,7 @@ SSHD_CONF
 # pane would follow it onto the volume.
 install -d -m 0755 "${herdr_volume}"
 chown "${uid}:${gid}" "${herdr_volume}"
-install -d -m 0700 -o "${uid}" -g "${gid}" "${herdr_volume}/herdr" "${herdr_volume}/state"
+install -d -m 0700 -o "${uid}" -g "${gid}" "${herdr_volume}/herdr" "${herdr_volume}/state" "${herdr_volume}/core-state"
 
 ensure_user_dir() {
     if [[ ! -d "$1" ]]; then
@@ -944,6 +974,11 @@ link_herdr_dir "${home_dir}/.config/herdr" "${herdr_volume}/herdr"
 ensure_user_dir "${home_dir}/.local"
 ensure_user_dir "${home_dir}/.local/state"
 link_herdr_dir "${home_dir}/.local/state/herdr" "${herdr_volume}/state"
+# herdr-core keeps its identity (core.json), state, and socket under
+# ~/.local/state/herdr-core. The Mac's core pins that identity, so it has to
+# survive dev down and dev up on the per-worktree volume. The core itself is
+# started over SSH by the Mac's core; nothing here launches it.
+link_herdr_dir "${home_dir}/.local/state/herdr-core" "${herdr_volume}/core-state"
 
 # Herdr's default new_cwd is "follow", which starts the first pane in $HOME.
 # A fixed path puts it in the worktree. The file is written once; the server

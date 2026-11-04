@@ -838,6 +838,7 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	}
 
 	ensureHerdrMachine(ctx, cfg, rec.ID, stdout, stderr)
+	ensureHCMachine(ctx, cfg, rec.ID, stdout, stderr)
 	status(cfg, stdout, "done: %s is up for %s", containerName(rec.ID), wt.CheckoutPath)
 	return nil
 }
