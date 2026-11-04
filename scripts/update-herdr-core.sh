@@ -63,7 +63,7 @@ resolve_manifest() {
     local manifest="$1"
     local requested="$2"
 
-    HC_MANIFEST="$manifest" HC_REQUESTED="$requested" HC_RELEASES="${herdr_core_releases_url%/}" python3 - <<'PY'
+    HC_MANIFEST="$manifest" HC_REQUESTED="$requested" python3 - <<'PY'
 import json
 import os
 import re
@@ -248,8 +248,10 @@ main() {
     download_asset "$version" "linux-x86_64" "$amd64_archive" "$sha_amd64"
     download_asset "$version" "linux-aarch64" "$arm64_archive" "$sha_arm64"
 
-    update_dockerfile "$version" "$sha_amd64" "$sha_arm64"
+    # Check the binary before touching the Dockerfile so a bad release never
+    # lands in the pin.
     smoke_check_host_binary "$version" "$amd64_archive" "$arm64_archive" "$tmpdir"
+    update_dockerfile "$version" "$sha_amd64" "$sha_arm64"
 
     printf 'updated: %s\n' "$dockerfile"
     printf 'HERDR_CORE_VERSION=%s\n' "$version"

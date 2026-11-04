@@ -1039,13 +1039,7 @@ func ensureHerdrMachine(ctx context.Context, cfg config, id string, stdout, stde
 
 	status(cfg, stdout, "register: Herdr machine %s", id)
 	notice(stderr, "if Herdr offers to install a server into ~/.local/bin, answer no: the image already ships herdr, bump HERDR_VERSION with scripts/update-herdr.sh instead")
-	cmd := exec.CommandContext(ctx, herdrBin, herdrMachineAddArgs(id)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if terminalFile(os.Stdin) {
-		cmd.Stdin = os.Stdin
-	}
-	if err := cmd.Run(); err != nil {
+	if err := runOnTerminal(ctx, herdrBin, herdrMachineAddArgs(id)...); err != nil {
 		notice(stderr, "herdr machine add failed: %v", err)
 		notice(stderr, "the container is up; register it with:")
 		notice(stderr, "  %s", addLine)

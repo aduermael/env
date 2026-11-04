@@ -78,14 +78,35 @@ func TestLookupHCPrefersPathThenLocalBin(t *testing.T) {
 }
 
 func TestHCVersionMismatch(t *testing.T) {
-	if _, _, mismatch := hcVersionMismatch("hc 0.1.17\n", "0.1.17"); mismatch {
+	if _, _, mismatch := hcVersionMismatch("hc 0.1.17\n", "hc 0.1.17\n"); mismatch {
 		t.Fatal("same versions must not mismatch")
 	}
-	local, remote, mismatch := hcVersionMismatch("hc 0.1.18\n", "0.1.17")
+	local, remote, mismatch := hcVersionMismatch("hc 0.1.18\ncommit abc123\n", "hc 0.1.17\n")
 	if !mismatch || local != "0.1.18" || remote != "0.1.17" {
 		t.Fatalf("got %q %q %v", local, remote, mismatch)
 	}
 	if _, _, mismatch := hcVersionMismatch("hc 0.1.18\n", ""); mismatch {
 		t.Fatal("an unknown remote version must not warn")
+	}
+}
+
+func TestHCMachineActionNameTaken(t *testing.T) {
+	// Fixture entry 4 is named env-root-a1b2c3 but targets other-host; with
+	// the real entry gone, that name blocks the add.
+	list, err := parseHCMachineList([]byte(hcMachineListFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	list.Machines = list.Machines[1:]
+	action, m := hcMachineAction(list, "env-root-a1b2c3")
+	if action != hcNameTaken || m.Target != "other-host" {
+		t.Fatalf("action = %v (%q), want name taken by the other-host entry", action, m.Target)
+	}
+}
+
+func TestLookupHCWithoutHome(t *testing.T) {
+	notOnPath := func(string) (string, error) { return "", errors.New("not found") }
+	if path, ok := lookupHC(notOnPath, ""); ok {
+		t.Fatalf("an unknown home must not resolve a relative path, got %q", path)
 	}
 }

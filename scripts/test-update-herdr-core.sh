@@ -82,11 +82,13 @@ print(arm64)
 PY
 }
 
+# Rewrites through a temp file: BSD sed's -i needs a suffix, GNU's does not.
 corrupt_shas() {
-    sed -i \
+    sed \
         -e 's/^ARG HERDR_CORE_SHA256_AMD64=.*/ARG HERDR_CORE_SHA256_AMD64=0000000000000000000000000000000000000000000000000000000000000000/' \
         -e 's/^ARG HERDR_CORE_SHA256_ARM64=.*/ARG HERDR_CORE_SHA256_ARM64=1111111111111111111111111111111111111111111111111111111111111111/' \
-        "$1"
+        "$1" > "$1.tmp"
+    mv "$1.tmp" "$1"
 }
 
 require_command grep
