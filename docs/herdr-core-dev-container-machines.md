@@ -16,7 +16,9 @@ The TUI and the desktop app do not share terminals. A pane opened in the TUI is 
 
 A saved machine is a name, an SSH target, an optional remote session, and the identity of the remote core. The target is the string given to `hc machine add`, handed to the system `ssh`, so a Host alias from `~/.ssh/config` works. `ssh` reads the config from the account's home as `getpwuid` reports it, not from `$HOME`.
 
-The connection is a byte protocol over a non-PTY SSH command. The remote login must print nothing extra to stdout. The managed `sshd` config already sets `PrintMotd no`, `Banner none`, and `PermitUserRC no`, which is exactly that requirement, and `hc` runs `ssh` without a terminal, so `StrictHostKeyChecking accept-new` in the shared `Host devenv-*` block is what records the host key on first contact.
+The connection is a byte protocol over a non-PTY SSH command. The remote login must print nothing extra to stdout. The managed `sshd` config already sets `PrintMotd no`, `Banner none`, and `PermitUserRC no`, which is exactly that requirement. `hc` runs `ssh` without a terminal and cannot answer a host-key prompt. It never has to: the ready check in `dev up` runs `ssh devenv-<id> true` through the alias before any registration, and `accept-new` records the host key there. A recreated container presents the same key, so `hc` only ever sees a known host.
+
+Every `hc` command that talks to machines starts the local core when it is not running, as a detached process that outlives the command. `dev up` therefore starts the Mac's core as a side effect of `hc machine ls`. The app would start it anyway.
 
 The remote core has an identity, written to `core.json` in its state directory the first time it starts. The local core stores that identity with the machine. When a container comes back with a fresh state directory, the local core reports the machine as unreachable with the reason "a different core answers there" and does not connect. The Linux spike reproduced this by recreating a container whose state lived in the container's own filesystem. The state directory therefore has to persist per worktree, on the Herdr volume. The same rule that keeps the host key fixed keeps the core identity fixed.
 
@@ -39,7 +41,7 @@ linux-aarch64  https://releases.herdr.dev/core/0.1.17/herdr-core-linux-aarch64.t
 linux-x86_64   https://releases.herdr.dev/core/0.1.17/herdr-core-linux-x86_64.tar.gz
 ```
 
-The archive holds one static binary, `herdr-core`. The layer downloads it, checks the digest, installs it as `/usr/local/bin/herdr-core` mode `0755`, symlinks `/usr/local/bin/hc` to it, and asserts `hc --version` prints `hc <version>`. It goes right after the `herdr` layer so a bump rebuilds only the cheap tail of the image.
+The archive holds the static binary `herdr-core` plus `LICENSE` and `THIRD-PARTY-NOTICES`. The layer downloads it, extracts only the binary, checks the digest, installs it as `/usr/local/bin/herdr-core` mode `0755`, symlinks `/usr/local/bin/hc` to it, and asserts `hc --version` prints `hc <version>`. It goes right after the `herdr` layer so a bump rebuilds only the cheap tail of the image.
 
 `scripts/update-herdr-core.sh` mirrors `scripts/update-herdr.sh`: with no argument it reads `latest.json`, with a version it reads that version's `manifest.json`, downloads both Linux archives, checks their digests against the manifest, rewrites the three `ARG` lines, and prints them. `scripts/test-herdr-core-pin.sh` and `scripts/test-update-herdr-core.sh` are copies of the existing tests with the names changed.
 
@@ -94,7 +96,7 @@ The Mac core and the remote core have to be within whatever window `herdr-core` 
 The Linux half ran against throwaway containers from the current image, with `hc 0.1.17` on both sides, and is recorded above. The Mac half, against the desktop app and the installed `hc`, has to confirm:
 
 - `hc machine add devenv-<id> --name <id>` from a Mac terminal saves the machine, with the alias resolved through the managed include in `~/.ssh/config`, and the app shows it without a restart. Adding the same alias from Settings → Machines lands in the same list.
-- First contact records the host key through `accept-new` with no prompt, and a recreated container on the same alias, port, and host key, with its volume intact, reconnects as the same machine with the same core identity. A container whose volume was deleted is reported as a different core, and `dev up` replaces the entry.
+- A recreated container on the same alias, port, and host key, with its volume intact, reconnects as the same machine with the same core identity. A container whose volume was deleted is reported as a different core, and `dev up` replaces the entry.
 - Where a new terminal opened in the app starts on the remote machine: the home, the core's working directory, or a folder the app remembers. This decides whether the entrypoint starts the core from the pane directory.
 - Terminals opened in the app have `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH`, and `docker ps` works in one of them.
 - An agent started in the app keeps running after the app quits, after the Mac sleeps, and after `dev down` and `dev up` it is gone, which is the same rule as the TUI.
