@@ -220,6 +220,22 @@ To pin a specific release instead:
 scripts/update-herdr.sh 0.9.5
 ```
 
+### Update herdr-core in the dev image
+
+herdr-core (`hc`), the server the Herdr desktop app talks to, is pinned in
+`dev.Dockerfile` with checksums from the release manifest at
+releases.herdr.dev. To update it to the newest release:
+
+```sh
+scripts/update-herdr-core.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-herdr-core.sh 0.1.17
+```
+
 ## CLI Reference
 
 ```sh
@@ -345,6 +361,21 @@ session `default` are fixed per worktree and stored in
   next `dev up` brings the same machine back.
 - When `herdr` is not on the Mac `PATH`, `dev up` still succeeds and prints
   the `herdr machine add` line to run later.
+- The container is also a machine for the Herdr desktop app. The image ships
+  `hc` (herdr-core), and `dev up` runs `hc machine add devenv-<id> --name
+  <id>` when the Mac has `hc` on `PATH` or at `~/.local/bin/hc`. The
+  entrypoint starts the container's core from the worktree directory, which
+  is where the app opens new terminals on that machine, and restarts it when
+  it dies. The TUI and the app do not share terminals: a pane in one is not
+  visible in the other, but both run in the same container.
+- The container's core has an identity that lives on the per-worktree volume.
+  If that volume is removed, the app reports the machine as "a different core
+  answers there", and the next `dev up` replaces the entry.
+- `dev up` warns when the Mac's `hc` version differs from the container's.
+  Bump the pin with `scripts/update-herdr-core.sh` and rebuild, then `dev
+  down` and `dev up`. `hc machine update <id>` copies the Mac's `hc` into the
+  shared home instead; it works in a pinch, but the next image bump makes that
+  copy stale, so prefer the pin.
 - Rebuilding the image with `devenv setup` does not restart a running
   workspace container. The new image is used after `dev down` and `dev up`.
 - `devenv down --delete-data` removes the keys, the registry, the Herdr
@@ -405,11 +436,13 @@ Mount contract:
   `DOCKER_HOST=tcp://devenv-dockerproxy:2375`, avoiding direct host Docker
   socket mounts.
 - The repository root of the current git worktree is mounted at `/workspace`.
-- `~/.devenv/home/.config/herdr` and `~/.devenv/home/.local/state/herdr` are
-  symlinks onto the per-worktree Herdr volume (`devenv-herdr-<id>`, mounted at
-  `/var/lib/devenv/herdr`). Herdr config, sockets, session state, and logs are
-  per worktree. Other tool config under `~/.config`, such as `gh`, stays
-  shared. `XDG_CONFIG_HOME` is never set.
+- `~/.devenv/home/.config/herdr`, `~/.devenv/home/.local/state/herdr`, and
+  `~/.devenv/home/.local/state/herdr-core` are symlinks onto the per-worktree
+  Herdr volume (`devenv-herdr-<id>`, mounted at `/var/lib/devenv/herdr`).
+  Herdr config, sockets, session state, and logs, and the herdr-core identity,
+  state, and socket, are per worktree. Other tool config under `~/.config`,
+  such as `gh` and `herdr-core`, stays shared. `XDG_CONFIG_HOME` and
+  `XDG_STATE_HOME` are never set.
 
 `~/.devenv/gitconfig` should include:
 
@@ -469,7 +502,9 @@ containers exist should succeed.
   the rendered SSH config are what keep each worktree on the same Herdr
   machine. Do not remove the managed include in `~/.ssh/config`.
 - Do not remove the per-worktree Herdr volumes or saved Herdr profiles. Saved
-  machines go offline and come back on the next `dev up`.
+  machines, in the TUI and in the desktop app, go offline and come back on
+  the next `dev up`. The volume also holds the herdr-core identity the app
+  pins; removing it makes the app's entry unusable until `dev up` replaces it.
 - Do not remove the generated zshrc block.
 - Do not remove the dev image unless a separate explicit prune command or flag
   is added.
@@ -484,7 +519,7 @@ containers without forcing the user to re-authenticate tools.
 
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
-Git 2.55.0, Git LFS, OpenSSH client and server, tini, GitHub CLI (`gh`), herdr, Google Cloud CLI (`gcloud`),
+Git 2.55.0, Git LFS, OpenSSH client and server, tini, GitHub CLI (`gh`), herdr, herdr-core (`hc`), Google Cloud CLI (`gcloud`),
 kubectl, Dagger CLI (`dagger`), `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,

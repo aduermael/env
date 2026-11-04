@@ -453,7 +453,7 @@ func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		if err := removeHerdrVolumes(ctx, cfg, stdout); err != nil {
 			return err
 		}
-		notice(stderr, "saved Herdr machines now point at deleted keys; list them with 'herdr machine list' and remove them with 'herdr machine remove <id>'")
+		notice(stderr, "saved Herdr machines now point at deleted keys; list them with 'herdr machine list' and remove them with 'herdr machine remove <id>', and with 'hc machine ls' and 'hc machine rm <name>' for the desktop app")
 	} else {
 		status(cfg, stdout, "keep: %s", cfg.Root)
 	}

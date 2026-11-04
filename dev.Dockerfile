@@ -680,6 +680,36 @@ RUN set -eux; \
     printf '%s\n' "${herdr_ver_out}"; \
     printf '%s\n' "${herdr_ver_out}" | grep -Fx "herdr ${HERDR_VERSION}"
 
+# herdr-core (hc) is the server the Herdr desktop app talks to. It is pinned
+# the same way, right after herdr. The release manifest at
+# releases.herdr.dev/core/<version>/manifest.json publishes the archive
+# digests. The archive holds the static binary plus two license files; only
+# the binary is installed, with the hc symlink beside it.
+ARG HERDR_CORE_VERSION=0.1.18
+ARG HERDR_CORE_SHA256_AMD64=5b2f97cb4b2a9d7a6b2cc5942628203ed9fbb7cc0c2b4b09ad8a6f5648e246b7
+ARG HERDR_CORE_SHA256_ARM64=cf33393cf950bb763734dc3e16610ab9daf8492391a4ef0de56026cd7f752853
+RUN set -eux; \
+    image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${image_arch}" in \
+        amd64|x86_64) herdr_core_target="linux-x86_64"; herdr_core_sha256="${HERDR_CORE_SHA256_AMD64}" ;; \
+        arm64|aarch64) herdr_core_target="linux-aarch64"; herdr_core_sha256="${HERDR_CORE_SHA256_ARM64}" ;; \
+        *) echo "Unsupported image architecture for herdr-core: ${image_arch}" >&2; exit 1 ;; \
+    esac; \
+    herdr_core_file="herdr-core-${herdr_core_target}.tar.gz"; \
+    curl -fsSL "https://releases.herdr.dev/core/${HERDR_CORE_VERSION}/${herdr_core_file}" -o "/tmp/${herdr_core_file}"; \
+    echo "${herdr_core_sha256}  /tmp/${herdr_core_file}" | sha256sum -c -; \
+    mkdir -p /tmp/herdr-core; \
+    tar -xzf "/tmp/${herdr_core_file}" -C /tmp/herdr-core herdr-core; \
+    install -m 0755 /tmp/herdr-core/herdr-core /usr/local/bin/herdr-core; \
+    ln -sfn herdr-core /usr/local/bin/hc; \
+    rm -rf /tmp/herdr-core "/tmp/${herdr_core_file}"; \
+    test -x /usr/local/bin/herdr-core; \
+    hash -r; \
+    test "$(command -v hc)" = "/usr/local/bin/hc"; \
+    herdr_core_ver_out="$(hc --version)"; \
+    printf '%s\n' "${herdr_core_ver_out}"; \
+    printf '%s\n' "${herdr_core_ver_out}" | grep -Fx "hc ${HERDR_CORE_VERSION}"
+
 # devenv runs each container as a Herdr machine: sshd is the main process
 # and tini is PID 1 in front of the entrypoint. The host keys the package
 # generates at build time are deleted; dev-entrypoint installs the per-user
@@ -915,7 +945,7 @@ SSHD_CONF
 # pane would follow it onto the volume.
 install -d -m 0755 "${herdr_volume}"
 chown "${uid}:${gid}" "${herdr_volume}"
-install -d -m 0700 -o "${uid}" -g "${gid}" "${herdr_volume}/herdr" "${herdr_volume}/state"
+install -d -m 0700 -o "${uid}" -g "${gid}" "${herdr_volume}/herdr" "${herdr_volume}/state" "${herdr_volume}/core-state"
 
 ensure_user_dir() {
     if [[ ! -d "$1" ]]; then
@@ -944,6 +974,10 @@ link_herdr_dir "${home_dir}/.config/herdr" "${herdr_volume}/herdr"
 ensure_user_dir "${home_dir}/.local"
 ensure_user_dir "${home_dir}/.local/state"
 link_herdr_dir "${home_dir}/.local/state/herdr" "${herdr_volume}/state"
+# herdr-core keeps its identity (core.json), state, and socket under
+# ~/.local/state/herdr-core. The Mac's core pins that identity, so it has to
+# survive dev down and dev up on the per-worktree volume.
+link_herdr_dir "${home_dir}/.local/state/herdr-core" "${herdr_volume}/core-state"
 
 # Herdr's default new_cwd is "follow", which starts the first pane in $HOME.
 # A fixed path puts it in the worktree. The file is written once; the server
@@ -994,8 +1028,30 @@ supervise_herdr_server() {
     done
 }
 
+# herdr-core (hc) is the server the Herdr desktop app talks to. The app
+# opens new terminals in the core's working directory, so the core starts
+# here, from the pane directory, instead of waiting for the Mac's core to
+# start it over SSH from the home. hc server start detaches the core into
+# its own session and returns at once; when a core is already running, in
+# any directory, it only reports it. Every hc command auto-starts a missing
+# core, so the loop keeps the directory right after an hc server stop too.
+# It warns "no systemd user manager here" on each start; that is expected.
+start_hc_core() {
+    (cd "${pane_cwd}" 2>/dev/null || cd /
+     gosu "${user_name}" env "${herdr_env[@]}" hc server start >/dev/null </dev/null) ||
+        echo "devenv: hc server start failed" >&2
+}
+
+supervise_hc_core() {
+    while true; do
+        start_hc_core
+        sleep 10
+    done
+}
+
 cd "${pane_cwd}" 2>/dev/null || cd /
 supervise_herdr_server &
+supervise_hc_core &
 
 exec /usr/sbin/sshd -D -e
 SCRIPT

@@ -23,7 +23,7 @@ usage() {
     cat <<'EOF'
 Usage: update-software-pr.sh PACKAGE [latest|VERSION|TAG]
 
-PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, gh, herdr
+PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, gh, herdr, herdr-core
 
 Runs that package's ./scripts/update-*.sh from a fresh origin/main worktree.
 If dev.Dockerfile changes, creates a branch, pushes it, and opens a PR.
@@ -98,9 +98,15 @@ configure_package() {
             display_name="herdr"
             checksum_blurb="update amd64 and arm64 checksums for the new herdr release"
             ;;
+        herdr-core)
+            updater_rel="scripts/update-herdr-core.sh"
+            version_arg="HERDR_CORE_VERSION"
+            display_name="herdr-core"
+            checksum_blurb="update amd64 and arm64 checksums for the new herdr-core release"
+            ;;
         *)
             usage >&2
-            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, gh, or herdr)"
+            die "unknown package: $1 (expected grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, gh, herdr, or herdr-core)"
             ;;
     esac
     package="$1"
