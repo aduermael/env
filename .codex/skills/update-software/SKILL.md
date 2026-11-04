@@ -1,6 +1,6 @@
 ---
 name: update-software
-description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Claude Code CLI, Google Cloud CLI (gcloud), GitHub CLI (gh), kubectl, Dagger CLI, Terraform, Playwright, or herdr release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
+description: Manual-only workflow for updating the Grok Build, Codex, Cursor CLI, Claude Code CLI, Google Cloud CLI (gcloud), GitHub CLI (gh), kubectl, Dagger CLI, Terraform, Playwright, herdr, or herdr-core (hc) release pin in this repo. Use only when the user explicitly invokes $update-software or asks to run the update-software skill; it checks for a clean Git worktree, runs the matching ./scripts/update-*.sh, and opens a GitHub PR if dev.Dockerfile changes.
 ---
 
 # Update software pins
@@ -20,6 +20,7 @@ Supported `PACKAGE` values:
 - `playwright` — `./scripts/update-playwright.sh` (without a release argument, tracks the `playwright` NPM `latest` dist-tag; the image installs that release's Chromium and WebKit system libraries)
 - `gh` — `./scripts/update-gh.sh` (without a release argument, tracks the newest stable GitHub CLI release)
 - `herdr` — `./scripts/update-herdr.sh` (without a release argument, tracks the newest stable release published at herdr.dev)
+- `herdr-core` — `./scripts/update-herdr-core.sh` (without a release argument, tracks the newest release published at releases.herdr.dev/core; `hc`, the server the Herdr desktop app talks to)
 
 ## Workflow
 
@@ -43,6 +44,7 @@ Pass one optional release argument only when the user requested a specific versi
 ./.codex/skills/update-software/scripts/update-software-pr.sh playwright 1.58.2
 ./.codex/skills/update-software/scripts/update-software-pr.sh gh 2.98.0
 ./.codex/skills/update-software/scripts/update-software-pr.sh herdr 0.9.5
+./.codex/skills/update-software/scripts/update-software-pr.sh herdr-core 0.1.18
 ```
 
 The runner enforces the required behavior:

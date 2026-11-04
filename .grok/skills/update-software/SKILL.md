@@ -3,8 +3,8 @@ name: update-software
 description: >
   Manual-only workflow for updating the Grok Build, Codex, Cursor CLI,
   Claude Code CLI, Google Cloud CLI (gcloud), GitHub CLI (gh), kubectl,
-  Dagger CLI, Terraform (`terraform`), Playwright (`playwright`), or
-  herdr (`herdr`) release pin in this repo.
+  Dagger CLI, Terraform (`terraform`), Playwright (`playwright`),
+  herdr (`herdr`), or herdr-core (`herdr-core`) release pin in this repo.
   Use only when the user runs /update-software or asks to run the
   update-software skill; it checks
   for a clean Git worktree, runs the matching ./scripts/update-*.sh, and
