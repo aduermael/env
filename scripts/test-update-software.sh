@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Fixture test for the unified update-software skill runner.
 # Drives the shipped runner against a local git fixture for grok, codex,
-# cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, and gh: dirty worktree abort, matching updater dispatch,
+# cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, gh, and herdr: dirty worktree abort, matching updater dispatch,
 # and unchanged-Dockerfile no-update path.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pr_runner="${repo_root}/.codex/skills/update-software/scripts/update-software-pr.sh"
-packages=(grok codex cursor gcloud-cli kubectl dagger claude terraform playwright gh)
+packages=(grok codex cursor gcloud-cli kubectl dagger claude terraform playwright gh herdr)
 tmpdir=""
 
 die() {
@@ -60,15 +60,19 @@ grep -Fq -- '- `playwright`' "$skill_codex" \
     || die "codex skill package list does not name playwright"
 grep -Fq -- '- `gh`' "$skill_codex" \
     || die "codex skill package list does not name gh"
-grep -Fq 'PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, gh' "$pr_runner" \
-    || die "runner usage text does not name terraform, playwright, and gh"
+grep -Fq -- '- `herdr`' "$skill_codex" \
+    || die "codex skill package list does not name herdr"
+grep -Fq 'PACKAGE is one of: grok, codex, cursor, gcloud-cli, kubectl, dagger, claude, terraform, playwright, gh, herdr' "$pr_runner" \
+    || die "runner usage text does not name terraform, playwright, gh, and herdr"
 grep -Fq 'terraform' "$skill_grok" \
     || die "grok skill description does not name terraform"
 grep -Fq 'playwright' "$skill_grok" \
     || die "grok skill description does not name playwright"
 grep -Fq 'GitHub CLI (gh)' "$skill_grok" \
     || die "grok skill description does not name GitHub CLI"
-printf 'ok: skill package list names terraform, playwright, and gh\n'
+grep -Fq 'herdr (`herdr`)' "$skill_grok" \
+    || die "grok skill description does not name herdr"
+printf 'ok: skill package list names terraform, playwright, gh, and herdr\n'
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/test-update-software.XXXXXX")"
 fixture="${tmpdir}/repo"
@@ -90,6 +94,7 @@ ARG CLAUDE_CODE_VERSION=0.0.0
 ARG TERRAFORM_VERSION=0.0.0
 ARG PLAYWRIGHT_VERSION=0.0.0
 ARG GITHUB_CLI_VERSION=0.0.0
+ARG HERDR_VERSION=0.0.0
 EOF
 
 for pkg in "${packages[@]}"; do

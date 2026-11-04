@@ -198,6 +198,22 @@ To pin a specific release instead:
 scripts/update-gh.sh 2.98.0
 ```
 
+### Update herdr in the dev image
+
+herdr is pinned in `dev.Dockerfile` with checksums for both Linux image
+architectures. To update it to the latest stable release published at
+herdr.dev:
+
+```sh
+scripts/update-herdr.sh
+```
+
+To pin a specific release instead:
+
+```sh
+scripts/update-herdr.sh 0.9.5
+```
+
 ## CLI Reference
 
 ```sh
@@ -384,7 +400,7 @@ containers without forcing the user to re-authenticate tools.
 
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
-Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), Google Cloud CLI (`gcloud`),
+Git 2.55.0, Git LFS, OpenSSH client, GitHub CLI (`gh`), herdr, Google Cloud CLI (`gcloud`),
 kubectl, Dagger CLI (`dagger`), `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
