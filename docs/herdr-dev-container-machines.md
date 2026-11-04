@@ -131,7 +131,7 @@ Add `openssh-server` and `tini` to `dev.Dockerfile` on the late, cheap layers. D
 6. `chown`s `/var/lib/devenv/herdr` to the container user and creates `/var/lib/devenv/herdr/herdr` with the same owner, mode `0700`. Docker creates the volume as root, and the Herdr server runs as that user.
 7. Points Herdr's config directory at the volume with a symlink: `${home_dir}/.config/herdr -> /var/lib/devenv/herdr/herdr`. Create `${home_dir}/.config` owned by the container user when it is missing. If `${home_dir}/.config/herdr` is already a real directory, from a `herdr` run in the old `dev` shell, rename it to `herdr.pre-devenv-<UTC stamp>` and print a warning, then create the symlink. If it is already the right symlink, leave it. The home is the shared `~/.devenv/home` mount, so every container writes the same symlink, and each resolves it to its own volume. This is the only redirect. `XDG_CONFIG_HOME` is never set: it is process-wide, and `gh`, `git`, and other XDG-aware tools in every pane would follow it onto the per-worktree volume, which would make `gh auth login` per worktree and lose it with the volume. If a later Herdr release adds a dedicated config-directory flag or variable, prefer that over the symlink.
 8. Writes `/var/lib/devenv/herdr/herdr/config.toml` only when that file is absent, with `install -m 0644 -o "${uid}" -g "${gid}"` so the user-run server can update it. The file sets `onboarding = false` and `[terminal] new_cwd` to `DEVENV_PANE_CWD` (`/workspace` for the main checkout, `/workspace/worktrees/<name>` for a linked worktree). Herdr 0.9.5's default `new_cwd` is `follow`, and with no source pane that starts in `$HOME`, then the process cwd. A fixed path is what puts the first pane in the worktree. Do not overwrite the file once it exists.
-9. Starts `herdr server` as the container user, with `HOME` set to that user's home (`/home/dev` unless the entrypoint chose another), and with `USER`, `LOGNAME`, `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH` exported in the same command. `docker run -e` reaches the entrypoint. It does not reach a server that `sshd` starts later. The `gosu` invocation carries this environment.
+9. Starts `herdr server` as the container user, with `HOME` set to that user's home (`/home/dev` unless the entrypoint chose another), and with `USER`, `LOGNAME`, `SHELL`, `CODEX_HOME`, `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH` exported in the same command. `docker run -e` reaches the entrypoint. It does not reach a server that `sshd` starts later. The `gosu` invocation carries this environment.
 10. Runs `/usr/sbin/sshd -D -e` in the foreground. The container does not start a user shell.
 
 `sshd -D` is the container's main process, so the container stays up across shell exits and Herdr client disconnects. `dev down` and `devenv down` remove it. The spike confirms whether `herdr server` stays in the foreground or daemonizes and exits. If it exits zero after daemonizing, the entrypoint treats that as started. If the server process stays in the foreground, the entrypoint backgrounds it and still uses `sshd -D` as the main process. A later SSH session from `herdr machine add` can start the server when it is not running. `sshd` has to be up for that.
@@ -156,14 +156,10 @@ AllowUsers <container user>
 AuthorizedKeysFile /run/devenv/authorized_keys
 HostKey /run/devenv/ssh_host_ed25519_key
 PidFile /run/sshd.pid
-SetEnv HOME=<container home>
-SetEnv USER=<container user>
-SetEnv LOGNAME=<container user>
-SetEnv DOCKER_HOST=tcp://devenv-dockerproxy:2375
-SetEnv GIT_CONFIG_GLOBAL=/devenv/gitconfig
-SetEnv CODEX_SQLITE_HOME=/var/lib/codex-sqlite
-SetEnv PATH=<image PATH>
+SetEnv HOME=<container home> USER=<container user> LOGNAME=<container user> SHELL=/bin/bash CODEX_HOME=<container home>/.codex CODEX_SQLITE_HOME=/var/lib/codex-sqlite DOCKER_HOST=tcp://devenv-dockerproxy:2375 GIT_CONFIG_GLOBAL=/devenv/gitconfig PATH=<image PATH>
 ```
+
+Every variable sits on one `SetEnv` line. OpenSSH 9.2, the version in Debian bookworm, keeps only the first `SetEnv` directive it reads; later ones are dropped silently, and `sshd -T` shows which survived. `SHELL` is on the line because Herdr opens panes with `$SHELL` and falls back to `/bin/sh` when it is unset.
 
 `AllowUsers` is the username the entrypoint actually created (`LOCAL_USER_NAME`, default `dev`). The SSH config on the Mac uses that same name. The default remains `dev`.
 

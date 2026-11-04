@@ -43,11 +43,15 @@ type config struct {
 	HostSocket     string
 	ProxyContainer string
 	ProxyPort      string
-	SkipBuild      bool
-	SkipEnsure     bool
-	NoZshrc        bool
-	Quiet          bool
-	DeleteData     bool
+	// UserSSHDir is the Mac's ~/.ssh: the Herdr client key and the managed
+	// include in its config live there.
+	UserSSHDir string
+	// ContainerUser is the account sshd accepts inside the container.
+	ContainerUser string
+	SkipBuild     bool
+	NoZshrc       bool
+	Quiet         bool
+	DeleteData    bool
 }
 
 type bridgeConfig struct {
@@ -99,8 +103,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return setup(ctx, cfg, stdout, stderr)
-	case "run":
-		cfg, command, err := parseRunFlags(args)
+	case "up":
+		cfg, err := parseUpFlags(args)
 		if err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				printUsage(stdout)
@@ -108,7 +112,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return err
 		}
-		return runContainer(ctx, cfg, command, stdout, stderr)
+		return up(ctx, cfg, stdout, stderr)
+	case "stop":
+		cfg, err := parseStopFlags(args)
+		if err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				printUsage(stdout)
+				return nil
+			}
+			return err
+		}
+		return stop(ctx, cfg, stdout, stderr)
 	case "proxy-bridge":
 		bridge, err := parseProxyBridgeFlags(args)
 		if err != nil {
@@ -149,6 +163,8 @@ func baseConfig() (config, error) {
 		HostSocket:     os.Getenv("DEVENV_HOST_DOCKER_SOCKET"),
 		ProxyContainer: envOrDefault("DEVENV_PROXY_CONTAINER", defaultProxyContainer),
 		ProxyPort:      envOrDefault("DEVENV_PROXY_PORT", defaultProxyPort),
+		UserSSHDir:     filepath.Join(home, ".ssh"),
+		ContainerUser:  defaultContainerUser,
 	}, nil
 }
 
@@ -180,13 +196,13 @@ func parseSetupFlags(args []string) (config, error) {
 	return normalizeConfig(cfg)
 }
 
-func parseRunFlags(args []string) (config, []string, error) {
+func parseUpFlags(args []string) (config, error) {
 	cfg, err := baseConfig()
 	if err != nil {
-		return config{}, nil, err
+		return config{}, err
 	}
 
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs := flag.NewFlagSet("up", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.Image, "image", cfg.Image, "dev image reference")
 	fs.StringVar(&cfg.ProxyImage, "proxy-image", cfg.ProxyImage, "safe Docker socket proxy image reference")
@@ -194,16 +210,33 @@ func parseRunFlags(args []string) (config, []string, error) {
 	fs.StringVar(&cfg.HostSocket, "host-socket", cfg.HostSocket, "host Docker socket to proxy")
 	fs.StringVar(&cfg.ProxyContainer, "proxy-container", cfg.ProxyContainer, "safe Docker socket proxy container name")
 	fs.StringVar(&cfg.ProxyPort, "proxy-port", cfg.ProxyPort, "localhost port for the safe Docker socket proxy")
-	fs.BoolVar(&cfg.SkipEnsure, "skip-ensure", false, "skip state and proxy checks before running")
 	fs.BoolVar(&cfg.Quiet, "quiet", false, "reduce status output")
 	if err := fs.Parse(args); err != nil {
-		return config{}, nil, err
+		return config{}, err
 	}
-	cfg, err = normalizeConfig(cfg)
+	if fs.NArg() != 0 {
+		return config{}, fmt.Errorf("up does not accept positional arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	return normalizeConfig(cfg)
+}
+
+func parseStopFlags(args []string) (config, error) {
+	cfg, err := baseConfig()
 	if err != nil {
-		return config{}, nil, err
+		return config{}, err
 	}
-	return cfg, fs.Args(), nil
+
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&cfg.Root, "root", cfg.Root, "devenv state directory")
+	fs.BoolVar(&cfg.Quiet, "quiet", false, "reduce status output")
+	if err := fs.Parse(args); err != nil {
+		return config{}, err
+	}
+	if fs.NArg() != 0 {
+		return config{}, fmt.Errorf("stop does not accept positional arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	return normalizeConfig(cfg)
 }
 
 func parseProxyBridgeFlags(args []string) (bridgeConfig, error) {
@@ -284,6 +317,15 @@ func normalizeConfig(cfg config) (config, error) {
 	if cfg.ProxyPort == "" {
 		return config{}, errors.New("proxy port must not be empty")
 	}
+	if cfg.UserSSHDir != "" {
+		cfg.UserSSHDir, err = expandAndAbs(cfg.UserSSHDir)
+		if err != nil {
+			return config{}, fmt.Errorf("resolve ssh directory: %w", err)
+		}
+	}
+	if cfg.ContainerUser == "" {
+		cfg.ContainerUser = defaultContainerUser
+	}
 	port, err := strconv.Atoi(cfg.ProxyPort)
 	if err != nil || port < 1 || port > 65535 {
 		return config{}, fmt.Errorf("proxy port must be a TCP port number: %q", cfg.ProxyPort)
@@ -311,6 +353,16 @@ func setup(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		return err
 	}
 	if err := ensureSSH(cfg, stdout, stderr); err != nil {
+		return err
+	}
+	if err := ensureHerdrKeys(cfg, stdout, stderr, sshKeygen); err != nil {
+		return err
+	}
+	reg, err := loadRegistry(registryPath(cfg))
+	if err != nil {
+		return err
+	}
+	if err := writeSSHConfigs(cfg, reg, stdout); err != nil {
 		return err
 	}
 
@@ -354,47 +406,6 @@ func setup(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func runContainer(ctx context.Context, cfg config, command []string, stdout, stderr io.Writer) error {
-	if err := ensureMacOS(); err != nil {
-		return err
-	}
-	if !cfg.SkipEnsure {
-		status(cfg, stdout, "check: Docker CLI and daemon")
-		if err := dockerCheck(ctx); err != nil {
-			return err
-		}
-		if err := ensureLayout(cfg, stdout); err != nil {
-			return err
-		}
-		if err := ensureGitconfig(cfg, stdout); err != nil {
-			return err
-		}
-		if err := ensureSSH(cfg, stdout, stderr); err != nil {
-			return err
-		}
-		hostSocket, err := hostDockerSocket(cfg)
-		if err != nil {
-			return err
-		}
-		cfg.HostSocket = hostSocket
-		if err := ensureProxy(ctx, cfg, hostSocket, stdout, stderr); err != nil {
-			return err
-		}
-	} else if !isSocket(filepath.Join(cfg.Root, "run", "docker.sock")) {
-		return fmt.Errorf("safe Docker socket is not ready; run devenv setup or omit --skip-ensure")
-	}
-
-	args, err := devDockerRunArgs(cfg, command)
-	if err != nil {
-		return err
-	}
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	return cmd.Run()
-}
-
 func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	status(cfg, stdout, "check: Docker CLI and daemon")
 	if err := dockerCheck(ctx); err != nil {
@@ -429,6 +440,9 @@ func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	}
 
 	if cfg.DeleteData {
+		if err := removeSSHInclude(cfg, stdout); err != nil {
+			return err
+		}
 		status(cfg, stdout, "delete: %s", cfg.Root)
 		if err := os.RemoveAll(cfg.Root); err != nil {
 			return fmt.Errorf("delete devenv state directory: %w", err)
@@ -436,6 +450,10 @@ func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		if err := removeCodexSqliteVolume(ctx, cfg); err != nil {
 			return err
 		}
+		if err := removeHerdrVolumes(ctx, cfg, stdout); err != nil {
+			return err
+		}
+		notice(stderr, "saved Herdr machines now point at deleted keys; list them with 'herdr machine list' and remove them with 'herdr machine remove <id>'")
 	} else {
 		status(cfg, stdout, "keep: %s", cfg.Root)
 	}
@@ -455,6 +473,7 @@ func ensureLayout(cfg config, stdout io.Writer) error {
 		{filepath.Join(cfg.Root, "home", ".codex"), 0o700},
 		{filepath.Join(cfg.Root, "ssh"), 0o700},
 		{filepath.Join(cfg.Root, "run"), 0o700},
+		{filepath.Join(cfg.Root, "herdr"), 0o700},
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir.path, dir.mode); err != nil {
@@ -1046,68 +1065,6 @@ func bridgeConnection(client net.Conn, tcpAddress string) {
 	<-done
 }
 
-func devDockerRunArgs(cfg config, command []string) ([]string, error) {
-	workspace, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("find current directory: %w", err)
-	}
-
-	args := []string{
-		"run",
-		"--rm",
-		"--label", labelManaged + "=true",
-		"--label", labelRole + "=dev",
-		"--label", labelRoot + "=" + cfg.Root,
-		"--network", proxyNetworkName(cfg),
-		"-e", "LOCAL_USER_ID=" + fmt.Sprint(os.Getuid()),
-		"-e", "LOCAL_GROUP_ID=" + fmt.Sprint(os.Getgid()),
-		"-e", "DOCKER_HOST=tcp://" + cfg.ProxyContainer + ":2375",
-		"-e", "GIT_CONFIG_GLOBAL=/devenv/gitconfig",
-		"-v", workspace + ":/workspace",
-		"--mount", "type=bind,source=" + cfg.Root + ",target=/devenv,readonly",
-		"--mount", "type=bind,source=" + filepath.Join(cfg.Root, "home") + ",target=/home/dev",
-		"--mount", "type=bind,source=" + filepath.Join(cfg.Root, "ssh") + ",target=/home/dev/.ssh",
-		"--mount", "type=volume,source=" + codexSqliteVolumeName(cfg) + ",target=" + codexSqliteHome,
-		"-e", "CODEX_SQLITE_HOME=" + codexSqliteHome,
-	}
-
-	if terminalFile(os.Stdin) && terminalFile(os.Stdout) {
-		args = append(args, "-it")
-	}
-
-	args = append(args, forwardedTerminalEnv()...)
-
-	args = append(args, cfg.Image)
-	args = append(args, command...)
-	return args, nil
-}
-
-func forwardedTerminalEnv() []string {
-	names := []string{
-		"TERM",
-		"COLORTERM",
-		"TERM_PROGRAM",
-		"TERM_PROGRAM_VERSION",
-		"KITTY_WINDOW_ID",
-		"WEZTERM_PANE",
-		"GHOSTTY_RESOURCES_DIR",
-		"VTE_VERSION",
-		"CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT",
-	}
-	var env []string
-	for _, name := range names {
-		if value := os.Getenv(name); value != "" {
-			env = append(env, "-e", name+"="+value)
-		}
-	}
-	return env
-}
-
-func terminalFile(file *os.File) bool {
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
 func installZshrc(cfg config, stdout io.Writer) error {
 	block := zshrcBlock(cfg)
 	data, err := os.ReadFile(cfg.Zshrc)
@@ -1186,7 +1143,18 @@ esac
 	}
 	b.WriteString(`
 dev() {
-  command devenv run --quiet -- "$@"
+  if [ "$#" -ne 1 ]; then
+    echo "usage: dev up|down" >&2
+    return 2
+  fi
+  case "$1" in
+    up) command devenv up --quiet ;;
+    down) command devenv stop --quiet ;;
+    *)
+      echo "usage: dev up|down" >&2
+      return 2
+      ;;
+  esac
 }
 `)
 	fmt.Fprintf(&b, "%s\n", zshrcEndMarker)
@@ -1349,13 +1317,15 @@ func printUsage(w io.Writer) {
 	}
 	fmt.Fprintf(w, `Usage:
   %[1]s [setup] [flags]
-  %[1]s run [flags] [--] [command [args...]]
+  %[1]s up [flags]
+  %[1]s stop [flags]
   %[1]s down [flags]
 
 Commands:
   setup    Prepare ~/.devenv, build the dev image, start the socket proxy, and install zsh functions.
-  run      Run a shell or command inside the dev container.
-  down     Remove containers created by devenv. State in ~/.devenv is kept unless --delete-data is set.
+  up       Start the dev container for the current git worktree and register it as a Herdr machine.
+  stop     Remove the dev container for the current git worktree. The Herdr machine and registry row stay.
+  down     Remove every container created by devenv. State in ~/.devenv is kept unless --delete-data is set.
 
 Setup flags:
   --image string             Local dev image tag (default %q or DEVENV_IMAGE).
@@ -1369,13 +1339,15 @@ Setup flags:
   --skip-build               Skip building the dev image.
   --no-zshrc                 Skip zshrc installation.
 
-Run flags:
+Up flags:
   --image string             Local dev image tag (default %q or DEVENV_IMAGE).
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
   --host-socket path         Host Docker socket to proxy (or DEVENV_HOST_DOCKER_SOCKET).
   --proxy-container name     Proxy container name (default %q).
   --proxy-port port          Localhost port for the proxy container (default %q).
-  --skip-ensure              Skip state and proxy checks before running.
+
+Stop flags:
+  --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
 
 Down flags:
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
