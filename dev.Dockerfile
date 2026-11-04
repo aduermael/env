@@ -956,7 +956,10 @@ fi
 
 # herdr server stays in the foreground. The loop restarts it when it dies
 # and stays out of the way when a client already started one over SSH:
-# a second start fails with "already running".
+# a second start fails with "already running". setsid makes the server its
+# own session leader, which is how Herdr tells a server that survives SSH
+# disconnects from one that would get SIGHUP; without it, machine add asks
+# to restart the server. -w keeps the loop waiting on the server's exit.
 herdr_env=(
     "HOME=${home_dir}"
     "USER=${user_name}"
@@ -985,7 +988,7 @@ supervise_herdr_server() {
         fi
         echo "devenv: starting herdr server" >&2
         status=0
-        gosu "${user_name}" env "${herdr_env[@]}" herdr server </dev/null || status=$?
+        setsid -w gosu "${user_name}" env "${herdr_env[@]}" herdr server </dev/null || status=$?
         echo "devenv: herdr server exited with status ${status}" >&2
         sleep 3
     done
