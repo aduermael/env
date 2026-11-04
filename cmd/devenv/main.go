@@ -1143,15 +1143,12 @@ esac
 	}
 	b.WriteString(`
 dev() {
-  if [ "$#" -ne 1 ]; then
-    echo "usage: dev up|down" >&2
-    return 2
-  fi
-  case "$1" in
-    up) command devenv up --quiet ;;
-    down) command devenv stop --quiet ;;
+  case "$#:$1:$2" in
+    0::|1:up:) command devenv up --quiet ;;
+    1:down:) command devenv stop --quiet ;;
+    2:down:--all) command devenv down --quiet ;;
     *)
-      echo "usage: dev up|down" >&2
+      echo "usage: dev [up] | dev down [--all]" >&2
       return 2
       ;;
   esac

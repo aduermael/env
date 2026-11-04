@@ -14,15 +14,17 @@ devenv setup
 After setup, a new zsh session should have these commands:
 
 ```sh
+dev
 dev up
 dev down
-devenv down
+dev down --all
 ```
 
-`dev up` starts the dev container for the current git worktree and registers
-it as a saved Herdr machine. Work happens in Herdr panes on that machine. `dev
-down` removes that worktree's container. `devenv down` removes every managed
-container.
+`dev up` (or plain `dev`) starts the dev container for the current git
+worktree and registers it as a Herdr machine, in the Herdr app, the herdr TUI,
+or both, depending on which are installed. Work happens in Herdr panes on that
+machine. `dev down` removes that worktree's container. `dev down --all` (the
+same as `devenv down`) removes every managed container.
 
 ## Build the CLI
 
@@ -275,7 +277,7 @@ generated `dev down` calls it. With no container running it succeeds.
 
 `devenv down` removes every managed runtime container, including the proxy
 bridge and proxy network. It keeps `~/.devenv` state unless `--delete-data` is
-passed.
+passed. The generated `dev down --all` calls `devenv down --quiet`.
 
 `devenv run` no longer exists.
 
@@ -322,17 +324,19 @@ case ":$PATH:" in
 esac
 
 dev() {
-  case "$1" in
-    up) command devenv up --quiet ;;
-    down) command devenv stop --quiet ;;
-    *) echo "usage: dev up|down" >&2; return 2 ;;
+  case "$#:$1:$2" in
+    0::|1:up:) command devenv up --quiet ;;
+    1:down:) command devenv stop --quiet ;;
+    2:down:--all) command devenv down --quiet ;;
+    *) echo "usage: dev [up] | dev down [--all]" >&2; return 2 ;;
   esac
 }
 # <<< devenv <<<
 ```
 
-`dev` accepts only `up` and `down`. Anything else prints usage and does not
-start a container.
+`dev` with no arguments is `dev up`. `dev down --all` stops every managed
+container, like `devenv down`. Anything else prints usage and does not start
+or stop a container.
 
 ## Herdr machines
 
@@ -359,8 +363,11 @@ session `default` are fixed per worktree and stored in
   server and its panes running. `dev down` removes the container; the Herdr
   profile, SSH alias, registry row, host key, and Herdr volume stay, and the
   next `dev up` brings the same machine back.
-- When `herdr` is not on the Mac `PATH`, `dev up` still succeeds and prints
-  the `herdr machine add` line to run later.
+- `dev up` registers the container with each Herdr client the Mac has: the
+  herdr TUI (`herdr` on `PATH`), the Herdr desktop app (`hc`, see below), or
+  both. Having only one of them is fine; the other is skipped. When neither is
+  installed, `dev up` still succeeds and prints both `machine add` lines to
+  run later.
 - The container is also a machine for the Herdr desktop app. The image ships
   `hc` (herdr-core), and `dev up` runs `hc machine add devenv-<id> --name
   <id>` when the Mac has `hc` on `PATH` or at `~/.local/bin/hc`. The
