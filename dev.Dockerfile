@@ -889,7 +889,7 @@ for name in DOCKER_HOST GIT_CONFIG_GLOBAL; do
     fi
 done
 session_env+=" PATH=${image_path}"
-cat > /etc/ssh/sshd_config.d/devenv.conf <<EOF
+cat > /etc/ssh/sshd_config.d/devenv.conf <<SSHD_CONF
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -906,7 +906,7 @@ AuthorizedKeysFile /run/devenv/authorized_keys
 HostKey /run/devenv/ssh_host_ed25519_key
 PidFile /run/sshd.pid
 SetEnv ${session_env}
-EOF
+SSHD_CONF
 /usr/sbin/sshd -t
 
 # Herdr config, sockets, and state live on the per-worktree volume. The home
