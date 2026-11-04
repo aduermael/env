@@ -685,9 +685,9 @@ RUN set -eux; \
 # releases.herdr.dev/core/<version>/manifest.json publishes the archive
 # digests. The archive holds the static binary plus two license files; only
 # the binary is installed, with the hc symlink beside it.
-ARG HERDR_CORE_VERSION=0.1.17
-ARG HERDR_CORE_SHA256_AMD64=82ec44043f6894bfdb716b979b87cda43fd7fa46b0104e7b7bd93e64d1a9b877
-ARG HERDR_CORE_SHA256_ARM64=3a37a454ec63494cf4306db26481fe9db96673d888723701d24f8a992ae8ab8c
+ARG HERDR_CORE_VERSION=0.1.18
+ARG HERDR_CORE_SHA256_AMD64=5b2f97cb4b2a9d7a6b2cc5942628203ed9fbb7cc0c2b4b09ad8a6f5648e246b7
+ARG HERDR_CORE_SHA256_ARM64=cf33393cf950bb763734dc3e16610ab9daf8492391a4ef0de56026cd7f752853
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \

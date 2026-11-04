@@ -100,7 +100,7 @@ The Linux half ran against throwaway containers from the current image, with `hc
 - Where a new terminal opened in the app starts on the remote machine: the home, the core's working directory, or a folder the app remembers. This decides whether the entrypoint starts the core from the pane directory. Result: the core's working directory, so the entrypoint starts it from the pane directory.
 - Terminals opened in the app have `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH`, and `docker ps` works in one of them.
 - An agent started in the app keeps running after the app quits, after the Mac sleeps, and after `dev down` and `dev up` it is gone, which is the same rule as the TUI.
-- What the Mac core does when the remote is one release behind and two releases behind, and whether `machine add` in a terminal offers to copy the Mac build in either case.
+- What the Mac core does when the remote is one release behind and two releases behind, and whether `machine add` in a terminal offers to copy the Mac build in either case. Result for one release behind: the app's core at 0.1.18 kept using a saved 0.1.17 machine with no prompt, and `dev up` printed the version notice, which is how the pin was bumped to 0.1.18. Two releases behind is still unseen.
 - The published port is not reachable from the LAN. This repeats the TUI check because the app may keep a connection open that the TUI did not.
 
 If the app cannot use a core that was started over SSH by a different `hc` build, or if it requires the remote core to be installed by its own installer, stop and revise this plan.
