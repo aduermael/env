@@ -1215,6 +1215,8 @@ func isDockerNotFound(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "no such object") ||
 		strings.Contains(msg, "no such container") ||
+		strings.Contains(msg, "no such volume") ||
+		strings.Contains(msg, "no such network") ||
 		strings.Contains(msg, "not found")
 }
 
