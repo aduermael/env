@@ -363,9 +363,10 @@ session `default` are fixed per worktree and stored in
   the `herdr machine add` line to run later.
 - The container is also a machine for the Herdr desktop app. The image ships
   `hc` (herdr-core), and `dev up` runs `hc machine add devenv-<id> --name
-  <id>` when the Mac has `hc` on `PATH` or at `~/.local/bin/hc`. The app's
-  local core starts the container's core over SSH and restarts it when it
-  dies. The TUI and the app do not share terminals: a pane in one is not
+  <id>` when the Mac has `hc` on `PATH` or at `~/.local/bin/hc`. The
+  entrypoint starts the container's core from the worktree directory, which
+  is where the app opens new terminals on that machine, and restarts it when
+  it dies. The TUI and the app do not share terminals: a pane in one is not
   visible in the other, but both run in the same container.
 - The container's core has an identity that lives on the per-worktree volume.
   If that volume is removed, the app reports the machine as "a different core

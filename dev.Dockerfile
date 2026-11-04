@@ -976,8 +976,7 @@ ensure_user_dir "${home_dir}/.local/state"
 link_herdr_dir "${home_dir}/.local/state/herdr" "${herdr_volume}/state"
 # herdr-core keeps its identity (core.json), state, and socket under
 # ~/.local/state/herdr-core. The Mac's core pins that identity, so it has to
-# survive dev down and dev up on the per-worktree volume. The core itself is
-# started over SSH by the Mac's core; nothing here launches it.
+# survive dev down and dev up on the per-worktree volume.
 link_herdr_dir "${home_dir}/.local/state/herdr-core" "${herdr_volume}/core-state"
 
 # Herdr's default new_cwd is "follow", which starts the first pane in $HOME.
@@ -1029,8 +1028,30 @@ supervise_herdr_server() {
     done
 }
 
+# herdr-core (hc) is the server the Herdr desktop app talks to. The app
+# opens new terminals in the core's working directory, so the core starts
+# here, from the pane directory, instead of waiting for the Mac's core to
+# start it over SSH from the home. hc server start detaches the core into
+# its own session and returns at once; when a core is already running, in
+# any directory, it only reports it. Every hc command auto-starts a missing
+# core, so the loop keeps the directory right after an hc server stop too.
+# It warns "no systemd user manager here" on each start; that is expected.
+start_hc_core() {
+    (cd "${pane_cwd}" 2>/dev/null || cd /
+     gosu "${user_name}" env "${herdr_env[@]}" hc server start >/dev/null </dev/null) ||
+        echo "devenv: hc server start failed" >&2
+}
+
+supervise_hc_core() {
+    while true; do
+        start_hc_core
+        sleep 10
+    done
+}
+
 cd "${pane_cwd}" 2>/dev/null || cd /
 supervise_herdr_server &
+supervise_hc_core &
 
 exec /usr/sbin/sshd -D -e
 SCRIPT

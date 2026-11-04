@@ -59,9 +59,9 @@ ${home_dir}/.local/state/herdr-core -> /var/lib/devenv/herdr/core-state
 
 `~/.config/herdr-core/` stays on the shared home. It holds only `config.toml` and templates, and those should be the same in every worktree. `XDG_STATE_HOME` and `XDG_CONFIG_HOME` are never set, for the reason the first plan gives. `XDG_RUNTIME_DIR` is unset in the container and `/run/user/<uid>` does not exist, so the core falls back to the state directory for its socket, which is the volume. That path is short enough for a Unix socket.
 
-The entrypoint does not start `herdr-core`. The local core on the Mac starts it over SSH on the first connection and again whenever it is gone. A core started that way inherits the `SetEnv` line of the managed `sshd` config. The Linux spike read `HOME`, `SHELL=/bin/bash`, `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH` from the remote core's environment, and its terminals ran `bash`. The core's working directory was the home.
+The local core on the Mac starts `herdr-core` over SSH on the first connection and again whenever it is gone. A core started that way inherits the `SetEnv` line of the managed `sshd` config. The Linux spike read `HOME`, `SHELL=/bin/bash`, `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH` from the remote core's environment, and its terminals ran `bash`. The core's working directory was the home.
 
-Where a new terminal starts is the one open question for the entrypoint. `hc run --on <machine>` starts in the machine's home unless `--cwd` is given, and the core's own working directory is the default for terminals created through its API. If the Mac spike finds that the app opens remote terminals in the core's working directory, the entrypoint starts the core itself from the pane directory, as the container user, with `hc server start` run from `DEVENV_PANE_CWD`, after `herdr server` and before `sshd`. The identity in `core.json` is the same either way, so a core started by the entrypoint and one started by the Mac are the same machine. If the app ignores the core's directory, the entrypoint leaves the core to the Mac and the README tells people to set the folder in the app.
+Where a new terminal starts was the one open question for the entrypoint. `hc run --on <machine>` starts in the machine's home unless `--cwd` is given, and the core's own working directory is the default for terminals created through its API. The Mac spike settled it: a terminal opened in the app on a core started from `/workspace` starts in `/workspace`, and on a core the Mac started over SSH it starts in the home. So the entrypoint starts the core itself, from the pane directory, as the container user, with the same environment as `herdr server`, before `sshd`. `hc server start` detaches the core into its own session and returns at once, and when a core is already running it only reports it, so a core the Mac started first is left alone. The identity in `core.json` is the same either way, so a core started by the entrypoint and one started by the Mac are the same machine. A loop repeats the start every few seconds: every `hc` command auto-starts a missing core from its own directory, so without the loop an `hc server stop` in a pane would let the Mac's core bring it back from the home.
 
 ## Registration
 
@@ -97,7 +97,7 @@ The Linux half ran against throwaway containers from the current image, with `hc
 
 - `hc machine add devenv-<id> --name <id>` from a Mac terminal saves the machine, with the alias resolved through the managed include in `~/.ssh/config`, and the app shows it without a restart. Adding the same alias from Settings → Machines lands in the same list.
 - A recreated container on the same alias, port, and host key, with its volume intact, reconnects as the same machine with the same core identity. A container whose volume was deleted is reported as a different core, and `dev up` replaces the entry.
-- Where a new terminal opened in the app starts on the remote machine: the home, the core's working directory, or a folder the app remembers. This decides whether the entrypoint starts the core from the pane directory.
+- Where a new terminal opened in the app starts on the remote machine: the home, the core's working directory, or a folder the app remembers. This decides whether the entrypoint starts the core from the pane directory. Result: the core's working directory, so the entrypoint starts it from the pane directory.
 - Terminals opened in the app have `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH`, and `docker ps` works in one of them.
 - An agent started in the app keeps running after the app quits, after the Mac sleeps, and after `dev down` and `dev up` it is gone, which is the same rule as the TUI.
 - What the Mac core does when the remote is one release behind and two releases behind, and whether `machine add` in a terminal offers to copy the Mac build in either case.
@@ -110,7 +110,7 @@ If the app cannot use a core that was started over SSH by a different `hc` build
 Image, in `dev.Dockerfile`:
 
 - Add the `herdr-core` layer with the three `ARG`s, the digest check, the `hc` symlink, and the version assertion.
-- Extend `dev-entrypoint` with the `~/.local/state/herdr-core` symlink and the `core-state` directory on the volume. Start the core from the pane directory only if the Mac spike says the app honors it.
+- Extend `dev-entrypoint` with the `~/.local/state/herdr-core` symlink and the `core-state` directory on the volume, and start the core from the pane directory, since the Mac spike showed the app honors it.
 
 Scripts:
 
