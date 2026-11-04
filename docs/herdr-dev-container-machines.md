@@ -1,6 +1,6 @@
 # Herdr machines for dev containers
 
-A macOS Herdr TUI connects to dev-env containers as saved SSH machines. Each git worktree has at most one dev container. The container is the machine: it stays up when a shell or the Herdr client disconnects. `dev down` stops that worktree. The next `dev up` brings the same Herdr machine back.
+A macOS Herdr TUI connects to dev-env containers as saved SSH machines. Each git worktree has at most one dev container. The container is the machine: it stays up when the Herdr client disconnects. `dev down` stops that worktree. The next `dev up` brings the same Herdr machine back.
 
 This is the implementation plan. It describes behavior to build. It does not change the image or the CLI by itself.
 
@@ -10,7 +10,7 @@ The Mac client is the Herdr TUI (`herdr`). The image already installs that binar
 
 The Herdr desktop app is a different program. It talks to `herdr-core` (`hc`). The TUI server and `herdr-core` do not share agents. This plan does not install `hc` and does not register machines with the desktop app.
 
-Herdr shows panes that belong to the remote Herdr server. A process started from a plain shell in the container stays outside that sidebar. `dev` remains a shell. Agents that should appear in Herdr are started from the Herdr client, in a pane on that machine.
+Herdr is the only terminal client. `dev` does not open a shell and does not run a one-shot command. Agents and shells are Herdr panes on that machine.
 
 ## What Herdr treats as one machine
 
@@ -45,9 +45,9 @@ Resolve it on the Mac before the container starts, by walking parent directories
 - A `.git` directory means this is the main worktree. Its git directory is that path.
 - A `.git` file containing `gitdir: <path>` means a linked worktree or a submodule. Resolve a relative `<path>` against the directory that contains the `.git` file, and store the absolute result. That absolute path is the git directory. `<git-dir>/commondir`, when present, is usually relative (`../..`); resolve it against the git directory and store the absolute path of the main `.git`.
 
-`dev` from a subdirectory uses that worktree. The container mounts the worktree root at `/workspace`. An interactive shell, and `dev <command>`, start in the subdirectory the user launched from (`docker exec -w`).
+`dev up` from a subdirectory uses that worktree. The container mounts the worktree root at `/workspace`. Herdr panes start there.
 
-A directory that is not inside a worktree keeps today's behavior: `docker run --rm`, no name, no SSH, no Herdr registration.
+`dev up` outside a worktree fails with an error. It does not start an anonymous container.
 
 ### Machine id
 
@@ -102,11 +102,11 @@ Every dev container accepts the same SSH credential. The containers are local, a
 | Client key | `~/.ssh/devenv_herdr_ed25519` | The Mac only. The container receives the public key. |
 | Host key | `~/.devenv/herdr/ssh_host_ed25519_key` | Copied into each container at start for `sshd`. The source of truth stays on the Mac. |
 
-`devenv run` bind-mounts all of `~/.devenv` read-only at `/devenv`. The client private key stays outside that tree. `ssh-keygen` writes the public key beside the private key; setup copies only `devenv_herdr_ed25519.pub` to `~/.devenv/herdr/id_ed25519.pub`, which the entrypoint reads at `/devenv/herdr/id_ed25519.pub`.
+The workspace container bind-mounts all of `~/.devenv` read-only at `/devenv`. The client private key stays outside that tree. `ssh-keygen` writes the public key beside the private key; setup copies only `devenv_herdr_ed25519.pub` to `~/.devenv/herdr/id_ed25519.pub`, which the entrypoint reads at `/devenv/herdr/id_ed25519.pub`.
 
 Generate each key once with `ssh-keygen -t ed25519 -N ""` when the file is absent. Never replace an existing key. Private keys are mode `0600`. This is a different key from `~/.devenv/ssh/id_ed25519`, which remains the outbound Git key and stays mounted at `/home/dev/.ssh`. That private key lives inside the container, so it is the wrong key for logging into the container.
 
-`devenv setup` and `devenv run` create the Herdr keys if they are missing, same as today's Git key.
+`devenv setup` and `devenv up` create the Herdr keys if they are missing, same as today's Git key.
 
 ### sshd
 
@@ -122,8 +122,8 @@ Serve mode is `DEVENV_SERVE=1`. After the entrypoint creates the `dev` user, it:
 4. Writes `/etc/ssh/sshd_config.d/devenv.conf`.
 5. `chown`s `/var/lib/devenv/herdr` to the container user. Docker creates the volume as root, and the Herdr server runs as that user.
 6. Writes `/var/lib/devenv/herdr/herdr/config.toml` with `onboarding = false` only when that file is absent. Herdr's config directory is `$XDG_CONFIG_HOME/herdr`.
-7. Starts `herdr server` as the container user. The container environment already has `XDG_CONFIG_HOME=/var/lib/devenv/herdr` from `docker run -e`, so the server, `sshd` sessions, and `docker exec` shells share one state directory.
-8. Runs `/usr/sbin/sshd -D -e` in the foreground. Shells are later `docker exec` processes, not this process.
+7. Starts `herdr server` as the container user. The container environment already has `XDG_CONFIG_HOME=/var/lib/devenv/herdr` from `docker run -e`, so the server and SSH sessions from the Mac client share one state directory.
+8. Runs `/usr/sbin/sshd -D -e` in the foreground. The container does not start a user shell.
 
 `sshd -D` is the container's main process, so the container stays up across shell exits and Herdr client disconnects. `dev down` and `devenv down` remove it. The spike confirms whether `herdr server` stays in the foreground or daemonizes and exits. If it exits zero after daemonizing, the entrypoint treats that as started. If the server process stays in the foreground, the entrypoint backgrounds it and still uses `sshd -D` as the main process. A later SSH session from `herdr machine add` can start the server when it is not running. `sshd` has to be up for that.
 
@@ -191,40 +191,38 @@ Host devenv-env-root-a1b2c3
 
 ## Container lifecycle
 
-Today `devDockerRunArgs` in `cmd/devenv/main.go` is `docker run --rm` with no container name and no published port. The shell is the container's main process, so quitting it removes that container. The workspace container is different: `sshd` is its main process, and it keeps running after every client leaves.
+Today `devenv run` is `docker run --rm`, and `dev` with no arguments opens a shell in that container. `dev <command>` runs that command the same way. This work removes both. The shell and the one-shot command are a second client next to Herdr, and a one-shot container is a second dev env for the same worktree.
 
-`dev up` starts that container and returns. It does not open a shell. Interactive `dev` starts it when it is down, then attaches a shell. Exiting the shell leaves the container, the Herdr server, and every pane running. Closing the Herdr client does the same. A second `dev` attaches another shell.
+The user-facing commands are `dev up` and `dev down`. `dev` with no arguments, or `dev` with any other command, prints usage and exits non-zero. `devenv run` is removed.
+
+`dev up` starts the workspace container and returns. `sshd` is its main process. Closing the Herdr client leaves the server and its panes running. There is no shell attach.
 
 `dev down` is `devenv stop`. It removes that worktree's container and nothing else. With no container running, it succeeds. The proxy, other worktrees, the Herdr profile, the SSH alias, the registry row, the host key, and the Herdr volume stay. `devenv down` stays the global teardown: every managed container for this root, including the proxy.
 
-`dev <command>` does not start the workspace container and does not register a Herdr machine.
-
-The generated zsh function must treat a lone `up` or `down` as a host command. Today `dev()` forwards every argument after `--`, so `dev up` would otherwise run a program named `up` inside the container.
+The generated zsh function accepts only `up` and `down`. Today `dev()` forwards every argument after `--`, so `dev up` would otherwise run a program named `up` inside the container.
 
 For a worktree, under the registry lock:
 
-1. Resolve the worktree. Load or mint its id and port.
-2. Find a container with label `com.aduermael.env.devenv.worktree-gitdir=<git dir>` and `com.aduermael.env.devenv.root=<cfg.Root>`.
-3. `dev down` removes that container when it exists and returns. It does not remove the registry row.
-4. If the workspace container is running, `dev up` ensures Herdr registration and returns. Interactive `dev` attaches a shell. `dev <command>` execs the command. None of these create another container.
-5. If a one-shot container for that worktree is running, `dev <command>` execs into it. `dev up` and interactive `dev` wait for it to exit, then start the workspace container. The wait is bounded (30 seconds) and then returns an error that names the running container.
-6. If a stopped container still holds the stable name, `docker rm -f` it and continue. This is also how a container from the previous image is replaced: stop it with `dev down`, then `dev up`.
-7. If nothing for that worktree is running:
-   - `dev up` and interactive `dev` create the workspace container
-   - `dev <command>` creates today's one-shot `--rm` container, with the worktree label and the stable name, without SSH, without `DEVENV_SERVE`, and without Herdr registration
+1. Resolve the worktree. Outside a worktree, `dev up` and `dev down` fail.
+2. Load or mint its id and port.
+3. Find a container with label `com.aduermael.env.devenv.worktree-gitdir=<git dir>` and `com.aduermael.env.devenv.root=<cfg.Root>`.
+4. `dev down` removes that container when it exists and returns. It does not remove the registry row.
+5. If the workspace container is running, `dev up` ensures Herdr registration and returns. It does not create another container.
+6. If a stopped container still holds the stable name, `docker rm -f` it and continue. This is also how a container from the previous image is replaced: `dev down`, then `dev up`.
+7. `dev up` creates the workspace container.
 8. If `docker run --name` loses a race, inspect the winner. Use it when it is this worktree. Return an error when the name belongs to something else.
 
 The stable name is the mutual exclusion. A second container for the worktree cannot take it.
 
 The workspace container is started detached (`docker run -d`) with `--restart unless-stopped`. After a Docker restart it comes back with the same name, port, and host key, and Herdr reconnects. `dev down` uses `docker rm -f`, so a stopped worktree stays stopped. The CLI does not need to remain running for the container to stay up.
 
-`devenv setup` rebuilding the image does not replace a running workspace container. The new image is used the next time `dev up` or interactive `dev` creates the container.
+`devenv setup` rebuilding the image does not replace a running workspace container. The new image is used the next time `dev up` creates the container.
 
 `devenv down` still removes every container with `com.aduermael.env.devenv.managed=true` and this root, including the proxy and any workspace container. The Herdr profile, SSH alias, registry row, host key, and Herdr volume remain. The next `dev up` creates a new container on the same alias.
 
 ### Create arguments
 
-Keep the current mounts, labels, network, and env from `devDockerRunArgs`, and add serve-mode settings:
+Use the mounts, labels, network, and env that `devDockerRunArgs` uses today, and add serve-mode settings:
 
 ```text
 docker run -d --restart unless-stopped
@@ -256,39 +254,21 @@ The network name and Codex volume name already come from `proxyNetworkName` and 
 
 Publish `127.0.0.1`, not `0.0.0.0`. On OrbStack, published ports are reachable from the LAN unless the bind address is loopback or "Expose ports to LAN" is off. The spike confirms loopback publish stays on the Mac for both Docker Desktop and OrbStack.
 
-`-d` with no `-t` on create. There is no `--rm`: the container stays after the CLI exits, and `dev down` removes it. One-shot `dev <command>` keeps today's `--rm` and `-it` rules and does not pass `DEVENV_SERVE`, `XDG_CONFIG_HOME`, or a restart policy.
-
-Pass `TERM`, `COLORTERM`, and the other variables in `forwardedTerminalEnv()` on the `docker exec`, because the detached container does not see the caller's terminal.
+`-d` with no `-t` on create. There is no `--rm`: the container stays after `dev up` returns, and `dev down` removes it. The container does not need the caller's `TERM`. Herdr allocates its own ptys.
 
 Create the Herdr volume with labels `com.aduermael.env.devenv.managed=true`, `com.aduermael.env.devenv.role=herdr`, `com.aduermael.env.devenv.root=<cfg.Root>`, and `com.aduermael.env.devenv.machine-id=<id>`. `devenv down` without `--delete-data` leaves the volume. `devenv down --delete-data` removes volumes with those managed and root labels, along with the existing Codex SQLite volume.
 
 `XDG_CONFIG_HOME=/var/lib/devenv/herdr` makes Herdr store its files at `/var/lib/devenv/herdr/herdr/` on that volume. The volume is per machine id, so two worktrees do not share sockets or session files. The shared `~/.devenv/home` bind mount stays the place for tool state such as `~/.codex`. Herdr sockets stay off that mount: it is shared by every container, and it is a macOS virtiofs mount.
 
-### Attach
-
-Interactive `dev`, after the workspace container is healthy, attaches a shell and returns when that shell exits. The container keeps running:
-
-```text
-docker exec -it -u <user> -w <workdir> <container> bash
-```
-
-`dev up` does not exec a shell. A second interactive `dev` uses the same exec.
-
-`dev <command>` while any container for the worktree is running:
-
-```text
-docker exec -u <user> -w <workdir> <container> <command>
-```
-
-`<workdir>` is `/workspace` plus the relative path from the worktree root to the current directory. Add `-t` when stdin and stdout are terminals, matching today's `devDockerRunArgs` rule.
+### Ready check
 
 After creating a workspace container, retry `ssh -o BatchMode=yes devenv-<id> true` for up to 30 seconds. This uses the alias, so `accept-new` writes `~/.devenv/herdr/known_hosts` before Herdr connects. On timeout, print the container name and a `docker logs` hint, remove the container just created, and do not register a Herdr machine.
 
-Run registration after that check. On interactive `dev`, do it before `docker exec`, so an install prompt is visible. If `machine add` fails, print the error and still open the shell. `dev up` has the same registration step and then returns. The shell exit does not remove the container.
+`dev up` runs registration after that check and then returns. If `machine add` fails, print the error. The container stays up.
 
 ## Herdr registration
 
-After SSH is healthy, on `dev up` and interactive `dev` only:
+After SSH is healthy, on `dev up` only:
 
 ```text
 herdr machine list --json
@@ -301,9 +281,9 @@ Skip `machine add` when the JSON list already contains that SSH target. Match th
 
 `machine add` starts the remote `default` session when it is not already running, then saves the profile. An open local `herdr` shows the new machine within about a second.
 
-When `herdr` is not on the Mac `PATH`, `dev` still succeeds. Print the install command and the exact `machine add` line.
+When `herdr` is not on the Mac `PATH`, `dev up` still succeeds. Print the install command and the exact `machine add` line.
 
-`dev <command>` does not run `machine add` and does not print a registration hint. A script must not hang on an install prompt.
+`dev up` is the only command that runs `machine add`. Run it on a terminal when Herdr may prompt. A non-interactive `dev up` that would need a prompt prints the `machine add` line and leaves the container up.
 
 `devenv down` does not run `herdr machine remove`. The profile stays and goes offline. `--delete-data` removes the keys and the registry, which orphans existing profiles. Tell the user to remove them with `herdr machine remove <profile-id>` after reading `herdr machine list`.
 
@@ -337,26 +317,25 @@ Image, in `dev.Dockerfile`:
 - Install `openssh-server` and `tini`.
 - Remove build-time host keys.
 - Set `ENTRYPOINT ["tini", "--", "/usr/local/bin/dev-entrypoint"]`.
-- Extend `dev-entrypoint` with the serve-mode steps above. Leave the existing user, home, Claude settings, and `gosu` path in place for one-shot runs.
+- Extend `dev-entrypoint` with the serve-mode steps above. Leave the existing user, home, and Claude settings setup in place. The entrypoint no longer execs an interactive shell or a caller command.
 
 CLI, in `cmd/devenv/main.go`:
 
 - Create `~/.devenv/herdr` from `ensureLayout`.
-- Generate Herdr keys from `setup` and `run`, next to `ensureSSH`.
+- Generate Herdr keys from `setup` and `up`, next to `ensureSSH`.
 - Add worktree resolution, registry load/store, port allocation, and SSH config rendering as pure functions with tests.
-- Add `devenv up` and `devenv stop` (the per-worktree stop). Special-case a lone `up` or `down` in the generated `dev` function so `dev up` and `dev down` call those host commands instead of running `up` or `down` inside the container. `devenv down` remains the global command.
-- Branch `runContainer`: `dev up` ensures the detached workspace container; interactive `dev` ensures it and attaches a shell; `dev down` removes that worktree's container; `dev <command>` execs into a running worktree container or keeps `devDockerRunArgs`. Any directory that is not a worktree keeps `devDockerRunArgs`.
+- Add `devenv up` and `devenv stop` (the per-worktree stop). Replace the generated `dev` function so it accepts only `up` and `down`. `dev down` calls `devenv stop`. Anything else prints usage. `devenv down` remains the global command.
+- Remove `devenv run` and `devDockerRunArgs`. `dev up` ensures the detached workspace container. `dev down` removes that worktree's container.
 - Extend `down --delete-data` to remove Herdr volumes labeled for this root.
 - Update the usage text in `printUsage`.
 
 Docs, in `README.md`:
 
-- `dev up` starts the worktree container and returns. Interactive `dev` starts it when needed and attaches a shell. Exiting the shell leaves the container and its Herdr panes running.
-- `dev down` removes that worktree's container. `devenv down` is unchanged and still removes every managed container.
+- `dev up` starts the worktree container and returns. `dev down` removes that container. `devenv down` is unchanged and still removes every managed container.
+- `dev` no longer opens a shell or runs a command. `devenv run` is removed. Work happens in Herdr panes. `gh auth login` runs there after `dev up`.
 - The container is a Herdr machine while it is up. The same worktree keeps the same machine the next time `dev up` starts it.
-- `dev <command>` does not start that container. It runs inside it when one is already up, and otherwise stays a one-shot container.
 - State layout gains `herdr/` (host key, public key, `worktrees.json`, `ssh_config`, `known_hosts`). The client private key is `~/.ssh/devenv_herdr_ed25519`.
-- Directories that are not a worktree stay one-shot.
+- `dev up` outside a worktree fails.
 - Rebuilding the image does not restart a running workspace container.
 
 ## Tests
@@ -370,8 +349,9 @@ Unit tests in `cmd/devenv/main_test.go`, without Docker:
 - A recorded port that is busy is an error, and the stored port is unchanged.
 - SSH config contains one shared `Host devenv-*` block and one port block per worktree. The managed include is inserted at the top of an existing `~/.ssh/config` and replaced in place on the next write. Lines outside the block stay.
 - Existing keys are left in place when ensure runs again.
+- Tests that assert `devenv run` or `devDockerRunArgs` are removed with those functions.
 
-The Mac spike covers Docker Desktop, OrbStack, Herdr reconnect, and the single-container rule. `herdr machine list --json` shows the saved target is the alias. `dev up` returns with the container still running and no shell left open. Two interactive `dev` processes in the same worktree, one from a subdirectory, share one container, and both shells can exit while the container and an agent pane keep running. `dev down` removes that container and leaves another worktree's container running. `dev ls` with no container running does not publish SSH. `dev` in a linked worktree of the same repo gets a second container and a second Herdr machine. `devenv setup` while a workspace container is running leaves that container on its current image.
+The Mac spike covers Docker Desktop, OrbStack, Herdr reconnect, and the single-container rule. `herdr machine list --json` shows the saved target is the alias. `dev up` returns with the container still running. A Herdr pane keeps running after the Mac client detaches. `dev` with no arguments, and `dev ls`, print usage and do not start a container. `dev down` removes that container and leaves another worktree's container running. `dev up` in a linked worktree of the same repo gets a second container and a second Herdr machine. `devenv setup` while a workspace container is running leaves that container on its current image.
 
 ## Codex SQLite
 
@@ -383,7 +363,7 @@ Codex stores its logs and thread index in SQLite. On a macOS bind mount that fil
 - Changing `devenv down` into a per-worktree command. Per-worktree stop is `dev down`.
 - Replacing a running container because the image was rebuilt.
 - A per-worktree Codex SQLite volume.
+- An interactive `dev` shell, and `dev <command>` / `devenv run`.
 - Automatic removal of Herdr profiles.
-- Herdr inside one-shot containers.
 - SSH agent forwarding.
 - Publishing port 22 on any address other than `127.0.0.1`.
