@@ -38,14 +38,21 @@ The identity key is the worktree's absolute git directory:
 
 - main checkout: `<repo>/.git`
 - linked worktree: `<repo>/.git/worktrees/<name>`
-- submodule: the submodule's own git directory, the first `.git` found walking up from the current directory
+
+Linked worktrees exist only at `<repo>/worktrees/<name>`. `dev up` from any other linked-worktree path fails and names that expected directory.
 
 Resolve it on the Mac before the container starts, by walking parent directories. Do not require a `git` binary on the Mac.
 
-- A `.git` directory means this is the main worktree. Its git directory is that path.
-- A `.git` file containing `gitdir: <path>` means a linked worktree or a submodule. Resolve a relative `<path>` against the directory that contains the `.git` file, and store the absolute result. That absolute path is the git directory. `<git-dir>/commondir`, when present, is usually relative (`../..`); resolve it against the git directory and store the absolute path of the main `.git`.
+- A `.git` directory means this is the main worktree. Its git directory is that path. The repository root is its parent.
+- A `.git` file containing `gitdir: <path>` is a linked worktree. Resolve a relative `<path>` against the directory that contains the `.git` file. `<git-dir>/commondir`, usually `../..`, resolves against the git directory to the main `.git`. The checkout path must be `<repo>/worktrees/<name>`, where `<repo>` is the parent of that main `.git` and `<name>` is the final component of the git directory.
+- A `.git` file whose gitdir is under `.git/modules/` is a submodule. Keep walking to the superproject checkout and use that worktree's machine. Do not create a container for the submodule.
 
-`dev up` from a subdirectory uses that worktree. The container mounts the worktree root at `/workspace`. Herdr panes start there.
+`dev up` from a subdirectory uses that worktree. The container bind-mounts the repository root (the parent of the main `.git`) at `/workspace` and, when that path differs, at the same absolute path it has on the Mac. One mount covers `.git`, the main files, and every `worktrees/<name>` checkout. A relative `gitdir:` such as `../../.git/worktrees/<name>` resolves inside `/workspace`. An absolute `gitdir:` written by the Mac's git resolves through the host-path mount.
+
+Herdr panes start at the worktree checkout, not at `$HOME`:
+
+- main checkout: `/workspace`
+- linked worktree: `/workspace/worktrees/<name>`
 
 `dev up` outside a worktree fails with an error. It does not start an anonymous container.
 
@@ -58,7 +65,7 @@ Mint the id once, the first time a worktree gets a dev container. Store it in th
 ```
 
 - `repo-slug` is the directory name of the main checkout (the parent of the common `.git`), sanitized. When `commondir` is absent, use the directory that contains the `.git` that was found.
-- `worktree-slug` is `root` for the main worktree. For a linked worktree it is the final path component of `<repo>/.git/worktrees/<name>`. For a submodule git directory under `.git/modules/`, it is the module name. Sanitize that component.
+- `worktree-slug` is `root` for the main worktree. For a linked worktree it is `<name>` from `<repo>/worktrees/<name>`. Sanitize that component.
 - The suffix is 6 characters from `crypto/rand`, alphabet `a-z0-9`. Generate again if that full id is already in the registry.
 
 Sanitize a slug to lowercase `[a-z0-9-]`, collapse repeated dashes, and trim dashes. Cap each slug at 24 characters so the Docker name stays within 63 characters. An empty slug becomes `repo` or `wt`.
@@ -89,7 +96,7 @@ The map key is the absolute git directory. Update `worktree_path` when a linked 
 
 Hold an exclusive flock on `~/.devenv/herdr/worktrees.lock` for the whole create-or-attach decision, including the registry update and the `docker run`. Two concurrent `dev` invocations in the same worktree must end on one container.
 
-The port is allocated from `43100` through `43999` and then stored in the record. Skip ports already present in the file. `23750` is the Docker socket proxy and is outside this range. Never change a worktree's port after it is stored. A recorded port that is held by some other process is an error that names the id and the port. Reusing the port for a different worktree would make an old Herdr profile connect to the wrong container.
+The port is allocated from `43100` through `43999` and then stored in the record. Skip ports already present in the file, and skip `cfg.ProxyPort` even when `DEVENV_PROXY_PORT` is moved into that range. The default proxy port is `23750`. Never change a worktree's port after it is stored. A recorded port is an error only when a different listener holds it. This worktree's own running container is that listener, so `dev up` does the "already running" check before the port check. Reusing the port for a different worktree would make an old Herdr profile connect to the wrong container.
 
 `devenv down` leaves this file in place. `devenv down --delete-data` removes `~/.devenv`, including the registry, keys, and host keys.
 
@@ -112,17 +119,15 @@ Generate each key once with `ssh-keygen -t ed25519 -N ""` when the file is absen
 
 Add `openssh-server` and `tini` to `dev.Dockerfile` on the late, cheap layers. Delete any host keys the package generates at build time. `/run` is empty when the container starts, so the entrypoint creates `/run/sshd` before `sshd`.
 
-`tini` is PID 1 in front of `dev-entrypoint`. One-shot containers still end in `exec` of the user command.
-
-Serve mode is `DEVENV_SERVE=1`. After the entrypoint creates the `dev` user, it:
+`tini` is PID 1 in front of `dev-entrypoint`. There is no one-shot path. The entrypoint does not exec `"$@"` or `CMD ["bash"]`. After it creates the `dev` user, it:
 
 1. Creates `/run/devenv` as `root:root` mode `0755`, then `/run/sshd`. `sshd` keeps `StrictModes` on, so this directory must not be group-writable.
 2. Copies `/devenv/herdr/ssh_host_ed25519_key` and its `.pub` to `/run/devenv/`, both `root:root`, private key mode `0600`.
 3. Copies `/devenv/herdr/id_ed25519.pub` to `/run/devenv/authorized_keys`, owned by the container user, mode `0600`.
 4. Writes `/etc/ssh/sshd_config.d/devenv.conf`.
 5. `chown`s `/var/lib/devenv/herdr` to the container user. Docker creates the volume as root, and the Herdr server runs as that user.
-6. Writes `/var/lib/devenv/herdr/herdr/config.toml` with `onboarding = false` only when that file is absent. Herdr's config directory is `$XDG_CONFIG_HOME/herdr`.
-7. Starts `herdr server` as the container user. The container environment already has `XDG_CONFIG_HOME=/var/lib/devenv/herdr` from `docker run -e`, so the server and SSH sessions from the Mac client share one state directory.
+6. Writes `/var/lib/devenv/herdr/herdr/config.toml` only when that file is absent. Herdr's config directory is `$XDG_CONFIG_HOME/herdr`. The file sets `onboarding = false` and `[terminal] new_cwd` to `DEVENV_PANE_CWD` (`/workspace` for the main checkout, `/workspace/worktrees/<name>` for a linked worktree). Herdr 0.9.5's default `new_cwd` is `follow`, and with no source pane that starts in `$HOME`, then the process cwd. A fixed path is what puts the first pane in the worktree. Do not overwrite the file once it exists.
+7. Starts `herdr server` as the container user, with `HOME` set to that user's home (`/home/dev` unless the entrypoint chose another), and with `USER`, `LOGNAME`, `XDG_CONFIG_HOME`, `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, `CODEX_SQLITE_HOME`, and the image `PATH` exported in the same command. `docker run -e` reaches the entrypoint. It does not reach a server that `sshd` starts later. The `gosu` invocation carries this environment.
 8. Runs `/usr/sbin/sshd -D -e` in the foreground. The container does not start a user shell.
 
 `sshd -D` is the container's main process, so the container stays up across shell exits and Herdr client disconnects. `dev down` and `devenv down` remove it. The spike confirms whether `herdr server` stays in the foreground or daemonizes and exits. If it exits zero after daemonizing, the entrypoint treats that as started. If the server process stays in the foreground, the entrypoint backgrounds it and still uses `sshd -D` as the main process. A later SSH session from `herdr machine add` can start the server when it is not running. `sshd` has to be up for that.
@@ -135,6 +140,7 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
 UseDNS no
+UsePAM no
 PrintMotd no
 PrintLastLog no
 Banner none
@@ -144,7 +150,13 @@ AllowUsers <container user>
 AuthorizedKeysFile /run/devenv/authorized_keys
 HostKey /run/devenv/ssh_host_ed25519_key
 PidFile /run/sshd.pid
+SetEnv HOME=<container home>
+SetEnv USER=<container user>
+SetEnv LOGNAME=<container user>
 SetEnv XDG_CONFIG_HOME=/var/lib/devenv/herdr
+SetEnv DOCKER_HOST=tcp://devenv-dockerproxy:2375
+SetEnv GIT_CONFIG_GLOBAL=/devenv/gitconfig
+SetEnv CODEX_SQLITE_HOME=/var/lib/codex-sqlite
 SetEnv PATH=<image PATH>
 ```
 
@@ -154,7 +166,7 @@ SetEnv PATH=<image PATH>
 
 `SetEnv XDG_CONFIG_HOME` matters because Herdr 0.9.5 resolves its config directory from `XDG_CONFIG_HOME` when that variable is set (`config_dir()` in the 0.9.5 `src/config/io.rs`), and the server sockets (`herdr.sock`, `herdr-client.sock`) live under that directory. The supervised server and every non-interactive SSH command Herdr runs must see the same directory. OpenSSH's default `AcceptEnv` does not include `XDG_CONFIG_HOME`, so a client cannot point the remote server at a different directory. `PermitUserRC no` keeps `~/.ssh/rc` from writing extra bytes onto the SSH stream Herdr uses.
 
-`SetEnv PATH` includes `/usr/local/bin`, where the image installs `herdr`. Non-interactive SSH often has a default `PATH` that omits it. The spike confirms `ssh <alias> herdr --version` prints the pinned version and that Herdr uses `/usr/local/bin/herdr` rather than installing a second binary under `~/.local/bin`.
+`UsePAM no` keeps Debian's `pam_env` from replacing `PATH` after `SetEnv`. With PAM off, `pam_motd` does not run either. `SetEnv` is what an SSH-started `herdr server` actually inherits. It repeats `DOCKER_HOST`, `GIT_CONFIG_GLOBAL`, and `CODEX_SQLITE_HOME` from today's `devDockerRunArgs`, plus `HOME` and the image `PATH` (Go, Cargo, pnpm, linuxbrew, and `/usr/local/bin`). The spike confirms `ssh <alias> herdr --version` prints the pinned version, `ssh <alias> printenv DOCKER_HOST GIT_CONFIG_GLOBAL CODEX_SQLITE_HOME` prints those values, and Herdr uses `/usr/local/bin/herdr` rather than installing a second binary under `~/.local/bin`.
 
 Inside the container, `sshd` listens on port 22 on all container interfaces. Docker publishes that port only as `127.0.0.1:<port>:22`. Other containers on `devenv-dockerproxy-net` can open a TCP connection to it. They do not have the client private key.
 
@@ -201,13 +213,15 @@ The user-facing commands are `dev up` and `dev down`. `dev` with no arguments, o
 
 The generated zsh function accepts only `up` and `down`. Today `dev()` forwards every argument after `--`, so `dev up` would otherwise run a program named `up` inside the container.
 
+`devenv up` runs the current `runContainer` prelude before it takes the worktree lock: `ensureLayout`, `ensureGitconfig`, `ensureSSH`, Herdr key setup, and `ensureProxy`. `devenv down` removes the proxy container and `devenv-dockerproxy-net`. The next `dev up` has to create them again, or `docker run --network` fails.
+
 For a worktree, under the registry lock:
 
 1. Resolve the worktree. Outside a worktree, `dev up` and `dev down` fail.
 2. Load or mint its id and port.
 3. Find a container with label `com.aduermael.env.devenv.worktree-gitdir=<git dir>` and `com.aduermael.env.devenv.root=<cfg.Root>`.
 4. `dev down` removes that container when it exists and returns. It does not remove the registry row.
-5. If the workspace container is running, `dev up` ensures Herdr registration and returns. It does not create another container.
+5. If the workspace container is running, `dev up` ensures Herdr registration and returns. It does not check whether the published port is busy, and it does not create another container.
 6. If a stopped container still holds the stable name, `docker rm -f` it and continue. This is also how a container from the previous image is replaced: `dev down`, then `dev up`.
 7. `dev up` creates the workspace container.
 8. If `docker run --name` loses a race, inspect the winner. Use it when it is this worktree. Return an error when the name belongs to something else.
@@ -235,12 +249,14 @@ docker run -d --restart unless-stopped
   --network devenv-dockerproxy-net
   -p 127.0.0.1:<port>:22
   -e DEVENV_SERVE=1
+  -e DEVENV_PANE_CWD=/workspace/worktrees/<name>
   -e XDG_CONFIG_HOME=/var/lib/devenv/herdr
   -e LOCAL_USER_ID=...
   -e LOCAL_GROUP_ID=...
   -e DOCKER_HOST=tcp://devenv-dockerproxy:2375
   -e GIT_CONFIG_GLOBAL=/devenv/gitconfig
-  -v <worktree root>:/workspace
+  -v <repo root>:/workspace
+  -v <repo root>:<repo root>
   --mount type=bind,source=<root>,target=/devenv,readonly
   --mount type=bind,source=<root>/home,target=/home/dev
   --mount type=bind,source=<root>/ssh,target=/home/dev/.ssh
@@ -250,7 +266,7 @@ docker run -d --restart unless-stopped
   local-dev:latest
 ```
 
-The network name and Codex volume name already come from `proxyNetworkName` and `codexSqliteVolumeName`. The proxy container default is `devenv-dockerproxy`.
+The network name and Codex volume name already come from `proxyNetworkName` and `codexSqliteVolumeName`. The proxy container default is `devenv-dockerproxy`. `DOCKER_HOST` uses that container name. The second bind mount is omitted when the repository root is already `/workspace`. `<repo root>` is the parent of the main `.git`, for both the main checkout and a `worktrees/<name>` checkout.
 
 Publish `127.0.0.1`, not `0.0.0.0`. On OrbStack, published ports are reachable from the LAN unless the bind address is loopback or "Expose ports to LAN" is off. The spike confirms loopback publish stays on the Mac for both Docker Desktop and OrbStack.
 
@@ -299,7 +315,9 @@ The spike runs the current stable macOS `herdr` against the image pin. If `machi
 
 Do this on a Mac, against Docker Desktop and OrbStack, before changing `cmd/devenv`. A throwaway container from the current image is enough. Record the results in the implementation PR.
 
-- `ssh -o BatchMode=yes` to `127.0.0.1:<port>` as the container user, with the shared key, succeeds. `ssh <alias> herdr --version` prints only the version line.
+- `ssh -o BatchMode=yes` to `127.0.0.1:<port>` as the container user, with the shared key, succeeds. `ssh <alias> herdr --version` prints only the version line. `ssh <alias> printenv HOME DOCKER_HOST GIT_CONFIG_GLOBAL CODEX_SQLITE_HOME` prints the container home, the proxy URL, `/devenv/gitconfig`, and `/var/lib/codex-sqlite`.
+- In a linked worktree at `<repo>/worktrees/<name>`, `git status` succeeds in the container. The first Herdr pane's cwd is `/workspace/worktrees/<name>`.
+- `devenv down` then `dev up` recreates the proxy network and the workspace container.
 - `herdr machine add <alias> --label <id> --remote-session default` saves a profile and the machine appears in a local `herdr`.
 - Stop the container. The row goes dim. Start another container on the same alias, port, and host key. The same profile becomes reachable without `machine add` and without a host-key prompt.
 - A second container that presents a new host key on that alias makes Herdr show attention.
@@ -317,7 +335,7 @@ Image, in `dev.Dockerfile`:
 - Install `openssh-server` and `tini`.
 - Remove build-time host keys.
 - Set `ENTRYPOINT ["tini", "--", "/usr/local/bin/dev-entrypoint"]`.
-- Extend `dev-entrypoint` with the serve-mode steps above. Leave the existing user, home, and Claude settings setup in place. The entrypoint no longer execs an interactive shell or a caller command.
+- Extend `dev-entrypoint` with the serve-mode steps above. Leave the existing user, home, and Claude settings setup in place. The entrypoint exports `HOME` and the dev environment, starts `herdr server` as that user, and execs `sshd -D`. It does not exec `"$@"` or `CMD ["bash"]`.
 
 CLI, in `cmd/devenv/main.go`:
 
@@ -342,7 +360,7 @@ Docs, in `README.md`:
 
 Unit tests in `cmd/devenv/main_test.go`, without Docker:
 
-- Main worktree, linked worktree, submodule, and subdirectory resolution from fixture directories.
+- Main worktree, `<repo>/worktrees/<name>`, a subdirectory of each, and a submodule inside either, from fixture directories. A linked worktree outside `worktrees/<name>` is an error. A submodule resolves to the enclosing worktree. The mount source is the repository root, and the pane directory is `/workspace` or `/workspace/worktrees/<name>`.
 - A directory with no `.git` is not a worktree. A relative `gitdir:` and a relative `commondir` become absolute registry keys.
 - Slug sanitization, length cap, and suffix collision retry.
 - The same git directory returns the same id and port. A second worktree gets another id and port.
