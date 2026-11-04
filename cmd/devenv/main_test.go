@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -597,15 +598,79 @@ func TestWorkspaceRunArgs(t *testing.T) {
 	}
 }
 
-func TestZshrcDevFunctionAcceptsOnlyUpAndDown(t *testing.T) {
+func TestZshrcDevFunctionCallsDevenv(t *testing.T) {
 	block := zshrcBlock(config{Root: "/Users/me/.devenv", Image: "local-dev:latest", ProxyImage: "p", ProxyContainer: "c", ProxyPort: "23750"})
-	for _, want := range []string{"devenv up --quiet", "devenv stop --quiet", "usage: dev up|down"} {
+	for _, want := range []string{"devenv up --quiet", "devenv stop --quiet", "devenv down --quiet", "usage: dev [up] | dev down [--all]"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("zshrc block missing %q:\n%s", want, block)
 		}
 	}
 	if strings.Contains(block, "devenv run") {
 		t.Fatalf("zshrc block still calls devenv run:\n%s", block)
+	}
+}
+
+// TestZshrcDevFunctionDispatch sources the generated block with a stub
+// devenv on PATH and checks what each dev invocation runs.
+func TestZshrcDevFunctionDispatch(t *testing.T) {
+	shell := ""
+	for _, candidate := range []string{"zsh", "bash"} {
+		if path, err := exec.LookPath(candidate); err == nil {
+			shell = path
+			break
+		}
+	}
+	if shell == "" {
+		t.Skip("neither zsh nor bash is installed")
+	}
+
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/bin/sh\necho \"devenv $*\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "devenv"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	block := zshrcBlock(config{Root: root, Image: "local-dev:latest", ProxyImage: "p", ProxyContainer: "c", ProxyPort: "23750"})
+
+	cases := []struct {
+		args string
+		want string
+		code int
+	}{
+		{"", "devenv up --quiet", 0},
+		{"up", "devenv up --quiet", 0},
+		{"down", "devenv stop --quiet", 0},
+		{"down --all", "devenv down --quiet", 0},
+		{"up --all", "", 2},
+		{"down --everything", "", 2},
+		{"down --all extra", "", 2},
+		{"run", "", 2},
+		{"'down --all'", "", 2},
+	}
+	for _, tc := range cases {
+		script := block + "\ndev " + tc.args + "\n"
+		cmd := exec.Command(shell, "-c", script)
+		cmd.Env = append(os.Environ(), "DEVENV_HOME="+root)
+		var stdout, stderr strings.Builder
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		code := 0
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			code = exitErr.ExitCode()
+		} else if err != nil {
+			t.Fatalf("dev %s: %v", tc.args, err)
+		}
+		if code != tc.code || strings.TrimSpace(stdout.String()) != tc.want {
+			t.Fatalf("dev %s: exit %d, stdout %q, stderr %q; want exit %d, stdout %q", tc.args, code, stdout.String(), stderr.String(), tc.code, tc.want)
+		}
+		if tc.code != 0 && !strings.Contains(stderr.String(), "usage: dev") {
+			t.Fatalf("dev %s: expected usage on stderr, got %q", tc.args, stderr.String())
+		}
 	}
 }
 

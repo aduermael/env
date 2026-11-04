@@ -837,8 +837,13 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		}
 	}
 
-	ensureHerdrMachine(ctx, cfg, rec.ID, stdout, stderr)
-	ensureHCMachine(ctx, cfg, rec.ID, stdout, stderr)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	herdrBin, _ := exec.LookPath("herdr")
+	hcBin, _ := lookupHC(exec.LookPath, home)
+	registerHerdrMachines(ctx, cfg, rec.ID, herdrBin, hcBin, stdout, stderr)
 	status(cfg, stdout, "done: %s is up for %s", containerName(rec.ID), wt.CheckoutPath)
 	return nil
 }
@@ -1017,17 +1022,33 @@ func herdrMachineRegistered(machines []herdrMachine, id string) bool {
 	return false
 }
 
-// ensureHerdrMachine registers the container as a saved Herdr machine. It
-// never fails dev up: the container stays up and the user gets the command.
-func ensureHerdrMachine(ctx context.Context, cfg config, id string, stdout, stderr io.Writer) {
-	addLine := "herdr " + strings.Join(herdrMachineAddArgs(id), " ")
-	herdrBin, err := exec.LookPath("herdr")
-	if err != nil {
-		notice(stderr, "herdr is not installed on this Mac; install it from https://herdr.dev and then run:")
-		notice(stderr, "  %s", addLine)
+// registerHerdrMachines saves the container in whichever Herdr clients the
+// Mac has: the TUI (herdr), the desktop app (hc), or both. An empty path
+// means that client is not installed. It never fails dev up: the container
+// stays up and, when neither client is installed, the user gets both
+// commands.
+func registerHerdrMachines(ctx context.Context, cfg config, id, herdrBin, hcBin string, stdout, stderr io.Writer) {
+	if herdrBin == "" && hcBin == "" {
+		notice(stderr, "Herdr is not installed on this Mac; install the Herdr app or the herdr TUI from https://herdr.dev, then register the container:")
+		notice(stderr, "  app: hc %s", strings.Join(hcMachineAddArgs(id), " "))
+		notice(stderr, "  TUI: herdr %s", strings.Join(herdrMachineAddArgs(id), " "))
 		return
 	}
+	if herdrBin != "" {
+		ensureHerdrMachine(ctx, cfg, herdrBin, id, stdout, stderr)
+	} else {
+		status(cfg, stdout, "skip: herdr (TUI) is not installed on this Mac")
+	}
+	if hcBin != "" {
+		ensureHCMachine(ctx, cfg, hcBin, id, stdout, stderr)
+	} else {
+		status(cfg, stdout, "skip: hc (Herdr app) is not installed on this Mac")
+	}
+}
 
+// ensureHerdrMachine registers the container as a saved Herdr TUI machine.
+func ensureHerdrMachine(ctx context.Context, cfg config, herdrBin, id string, stdout, stderr io.Writer) {
+	addLine := "herdr " + strings.Join(herdrMachineAddArgs(id), " ")
 	out, err := exec.CommandContext(ctx, herdrBin, "machine", "list", "--json").Output()
 	if err == nil {
 		var machines []herdrMachine

@@ -112,21 +112,10 @@ func hcVersionMismatch(localOutput, remoteOutput string) (string, string, bool) 
 	return local, remote, true
 }
 
-// ensureHCMachine registers the container with the Mac's herdr-core. It
-// never fails dev up: the container stays up and the user gets the command.
-func ensureHCMachine(ctx context.Context, cfg config, id string, stdout, stderr io.Writer) {
+// ensureHCMachine registers the container with the Mac's herdr-core, which
+// the Herdr desktop app uses.
+func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, stderr io.Writer) {
 	addLine := "hc " + strings.Join(hcMachineAddArgs(id), " ")
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = ""
-	}
-	hcBin, ok := lookupHC(exec.LookPath, home)
-	if !ok {
-		notice(stderr, "hc (herdr-core) is not installed on this Mac; the Herdr desktop app installs it, or run: curl -fsSL https://releases.herdr.dev/core/install.sh | sh")
-		notice(stderr, "then register the container with:")
-		notice(stderr, "  %s", addLine)
-		return
-	}
 
 	action := hcAdd
 	var existing hcMachine
