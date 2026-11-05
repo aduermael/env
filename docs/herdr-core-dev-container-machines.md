@@ -88,7 +88,7 @@ When that entry has state `unreachable` and `why` starts with "a different core 
 
 The Mac core and the remote core have to be within whatever window `herdr-core` accepts. The docs only say a remote can be "too old to talk to". The app updates its core on its own schedule, so the pinned version will fall behind. Two things keep that from being a surprise:
 
-- `dev up` runs `hc --version` inside the container with `docker exec` and compares it to the Mac's `hc --version`, printing a notice when they differ that names `scripts/update-herdr-core.sh`. The `version` in `hc machine ls --json` is the one the local core last observed, which is stale right after a rebuild, so it is not the source.
+- `dev up` runs `hc --version` in the container over the `devenv-<id>` SSH alias, as the user `machine add` connects as, and compares it to the Mac's `hc --version`, printing a notice when they differ that names `scripts/update-herdr-core.sh`. The `version` in `hc machine ls --json` is the one the local core last observed, which is stale right after a rebuild, so it is not the source.
 - The Mac spike records what `machine add` and the app do when the remote is one or two releases behind. If the window is narrow, the plan for the pin changes from "bump when needed" to "bump with every app update", and the README says so.
 
 ## Spike

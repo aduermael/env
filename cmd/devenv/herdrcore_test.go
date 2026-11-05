@@ -107,12 +107,18 @@ func TestHCPreAddNotices(t *testing.T) {
 	}
 }
 
-func TestHerdrVersionsMatch(t *testing.T) {
-	if !herdrVersionsMatch("herdr 0.9.5\n", "herdr 0.9.5\n") {
+func TestVersionsMatch(t *testing.T) {
+	if !versionsMatch("herdr 0.9.5\n", "herdr 0.9.5\ncommit abc\n", "herdr") {
 		t.Fatal("same versions must match")
 	}
-	for _, c := range [][2]string{{"herdr 0.9.6\n", "herdr 0.9.5\n"}, {"herdr 0.9.5\n", ""}, {"", "herdr 0.9.5\n"}, {"", ""}} {
-		if herdrVersionsMatch(c[0], c[1]) {
+	for _, c := range [][2]string{
+		{"herdr 0.9.6\n", "herdr 0.9.5\n"},
+		{"herdr 0.9.5\n", ""},
+		{"", "herdr 0.9.5\n"},
+		{"", ""},
+		{"warning: config migrated\n", "warning: config migrated\n"},
+	} {
+		if versionsMatch(c[0], c[1], "herdr") {
 			t.Fatalf("%q/%q must not match", c[0], c[1])
 		}
 	}

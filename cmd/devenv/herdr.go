@@ -1059,7 +1059,7 @@ func ensureHerdrMachine(ctx context.Context, cfg config, herdrBin, id string, st
 	}
 
 	status(cfg, stdout, "register: Herdr machine %s", id)
-	if !herdrVersionsMatch(herdrVersionOutputs(ctx, herdrBin, id)) {
+	if localOut, remoteOut := versionOutputs(ctx, cfg, herdrBin, "herdr", id); !versionsMatch(localOut, remoteOut, "herdr") {
 		notice(stderr, "if Herdr offers to install a server into ~/.local/bin, answer no: the image already ships herdr, bump HERDR_VERSION with scripts/update-herdr.sh in the env repo instead")
 	}
 	if err := runOnTerminal(ctx, herdrBin, herdrMachineAddArgs(id)...); err != nil {
@@ -1069,25 +1069,46 @@ func ensureHerdrMachine(ctx context.Context, cfg config, herdrBin, id string, st
 	}
 }
 
-// herdrVersionOutputs returns `herdr --version` from the Mac and from the
-// running container, or "" for one that can't be read.
-func herdrVersionOutputs(ctx context.Context, herdrBin, id string) (localOut, remoteOut string) {
-	if out, err := exec.CommandContext(ctx, herdrBin, "--version").Output(); err == nil {
+// versionOutputs returns `<name> --version` from the Mac binary and from
+// the container, or "" for one that can't be read. It asks the container
+// over the same SSH alias machine add uses, so it sees the binary the dev
+// user's login PATH resolves (including one an earlier add installed under
+// ~/.local/bin), not what docker exec's root shell finds. It also asks the
+// container directly because the version a Mac client last saw in its
+// machine list is stale right after a rebuild.
+func versionOutputs(ctx context.Context, cfg config, localBin, name, id string) (localOut, remoteOut string) {
+	if out, err := exec.CommandContext(ctx, localBin, "--version").Output(); err == nil {
 		localOut = string(out)
 	}
-	if out, err := dockerOutput(ctx, "exec", containerName(id), "herdr", "--version"); err == nil {
-		remoteOut = out
+	if out, err := exec.CommandContext(ctx, "ssh",
+		"-F", userSSHConfigPath(cfg),
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=3",
+		containerName(id), name, "--version").Output(); err == nil {
+		remoteOut = string(out)
 	}
 	return localOut, remoteOut
 }
 
-// herdrVersionsMatch reports whether both herdr versions are known and equal.
-// Only then can machine add not offer to install a server, so the install
-// warning is skipped. Herdr accepts a client and server on different
-// releases, so a mismatch keeps the warning but is not itself a problem.
-func herdrVersionsMatch(localOut, remoteOut string) bool {
-	local := releaseFromVersion(localOut, "herdr")
-	return local != "" && local == releaseFromVersion(remoteOut, "herdr")
+// versionsMatch reports whether both `<name> --version` outputs carry a
+// release and it is the same one. Only then can machine add have nothing to
+// install or copy, so the warning before it is skipped.
+func versionsMatch(localOut, remoteOut, name string) bool {
+	local := releaseFromVersion(localOut, name)
+	return local != "" && local == releaseFromVersion(remoteOut, name)
+}
+
+// releaseFromVersion reads the release out of `<name> --version` output
+// ("herdr 0.9.5"). Only the first line counts; later lines may carry build
+// details. A first line without the "<name> " prefix is not a version, so
+// it gives "".
+func releaseFromVersion(output, name string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(output), "\n")
+	release, ok := strings.CutPrefix(strings.TrimSpace(line), name+" ")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(release)
 }
 
 func terminalFile(file *os.File) bool {
