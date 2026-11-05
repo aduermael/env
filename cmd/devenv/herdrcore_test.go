@@ -107,6 +107,17 @@ func TestHCPreAddNotices(t *testing.T) {
 	}
 }
 
+func TestHerdrVersionsMatch(t *testing.T) {
+	if !herdrVersionsMatch("herdr 0.9.5\n", "herdr 0.9.5\n") {
+		t.Fatal("same versions must match")
+	}
+	for _, c := range [][2]string{{"herdr 0.9.6\n", "herdr 0.9.5\n"}, {"herdr 0.9.5\n", ""}, {"", "herdr 0.9.5\n"}, {"", ""}} {
+		if herdrVersionsMatch(c[0], c[1]) {
+			t.Fatalf("%q/%q must not match", c[0], c[1])
+		}
+	}
+}
+
 func TestHCMachineActionNameTaken(t *testing.T) {
 	// Fixture entry 4 is named env-root-a1b2c3 but targets other-host; with
 	// the real entry gone, that name blocks the add.
