@@ -128,8 +128,9 @@ func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, 
 	switch action {
 	case hcRegistered:
 		status(cfg, stdout, "ok: hc machine %s is saved", id)
-		if local, remote, mismatch := hcVersions(ctx, hcBin, id); mismatch {
-			hcVersionNotice(stderr, local, remote)
+		localOut, remoteOut := hcVersionOutputs(ctx, hcBin, id)
+		if local, remote, mismatch := hcVersionMismatch(localOut, remoteOut); mismatch {
+			notice(stderr, "%s", hcVersionNoticeLine(local, remote))
 		}
 		return
 	case hcNameTaken:
@@ -150,41 +151,49 @@ func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, 
 	}
 
 	status(cfg, stdout, "register: hc machine %s", id)
-	// hc only offers to copy its own build when the container runs a
-	// different version, so the warning is noise when they match.
-	local, remote, mismatch := hcVersions(ctx, hcBin, id)
-	if mismatch {
-		notice(stderr, "if hc offers to copy its own build to the container, answer no: the image ships its own pinned hc")
+	for _, line := range hcPreAddNotices(hcVersionOutputs(ctx, hcBin, id)) {
+		notice(stderr, "%s", line)
 	}
 	if err := runOnTerminal(ctx, hcBin, hcMachineAddArgs(id)...); err != nil {
 		notice(stderr, "hc machine add failed: %v", err)
 		notice(stderr, "the container is up; register it with:")
 		notice(stderr, "  %s", addLine)
-		return
-	}
-	if mismatch {
-		hcVersionNotice(stderr, local, remote)
 	}
 }
 
-// hcVersions compares the Mac's hc with the one in the running container.
-// It asks the container directly: the version the local core reports in
-// `machine ls` is the one it last observed, which is stale right after a
-// rebuild. mismatch is false when either version can't be read.
-func hcVersions(ctx context.Context, hcBin, id string) (local, remote string, mismatch bool) {
-	localOut, err := exec.CommandContext(ctx, hcBin, "--version").Output()
-	if err != nil {
-		return "", "", false
+// hcVersionOutputs returns `hc --version` from the Mac and from the running
+// container, or "" for one that can't be read. It asks the container
+// directly: the version the local core reports in `machine ls` is the one it
+// last observed, which is stale right after a rebuild.
+func hcVersionOutputs(ctx context.Context, hcBin, id string) (localOut, remoteOut string) {
+	if out, err := exec.CommandContext(ctx, hcBin, "--version").Output(); err == nil {
+		localOut = string(out)
 	}
-	remoteOut, err := dockerOutput(ctx, "exec", containerName(id), "hc", "--version")
-	if err != nil {
-		return "", "", false
+	if out, err := dockerOutput(ctx, "exec", containerName(id), "hc", "--version"); err == nil {
+		remoteOut = out
 	}
-	return hcVersionMismatch(string(localOut), remoteOut)
+	return localOut, remoteOut
 }
 
-func hcVersionNotice(stderr io.Writer, local, remote string) {
-	notice(stderr, "hc on this Mac is %s and the container has %s; bump the image pin with scripts/update-herdr-core.sh in the env repo, then dev down and dev up", local, remote)
+// hcPreAddNotices returns the lines to print before `hc machine add`. hc
+// offers to copy its own build to a remote whose hc is missing or a
+// different version, so the copy warning is skipped only when both versions
+// are known to match. A known mismatch also gets the pin-bump notice, before
+// the add so it shows even when the add fails.
+func hcPreAddNotices(localOut, remoteOut string) []string {
+	local, remote := hcVersion(localOut), hcVersion(remoteOut)
+	if local != "" && local == remote {
+		return nil
+	}
+	copyWarning := "if hc offers to copy its own build to the container, answer no: the image ships its own pinned hc"
+	if local == "" || remote == "" {
+		return []string{copyWarning + "; bump it with scripts/update-herdr-core.sh in the env repo"}
+	}
+	return []string{hcVersionNoticeLine(local, remote), copyWarning}
+}
+
+func hcVersionNoticeLine(local, remote string) string {
+	return fmt.Sprintf("hc on this Mac is %s and the container has %s; bump the image pin with scripts/update-herdr-core.sh in the env repo, then dev down and dev up", local, remote)
 }
 
 // runOnTerminal runs a command on the user's terminal so it can prompt.
