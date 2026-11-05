@@ -128,7 +128,9 @@ func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, 
 	switch action {
 	case hcRegistered:
 		status(cfg, stdout, "ok: hc machine %s is saved", id)
-		hcVersionNotice(ctx, hcBin, id, stderr)
+		if local, remote, mismatch := hcVersions(ctx, hcBin, id); mismatch {
+			hcVersionNotice(stderr, local, remote)
+		}
 		return
 	case hcNameTaken:
 		notice(stderr, "hc already has a machine named %s that points at %s, not at %s", existing.Name, existing.Target, containerName(id))
@@ -148,32 +150,41 @@ func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, 
 	}
 
 	status(cfg, stdout, "register: hc machine %s", id)
-	notice(stderr, "if hc offers to copy its own build to the container, answer no: the image already ships hc, bump HERDR_CORE_VERSION with scripts/update-herdr-core.sh instead")
+	// hc only offers to copy its own build when the container runs a
+	// different version, so the warning is noise when they match.
+	local, remote, mismatch := hcVersions(ctx, hcBin, id)
+	if mismatch {
+		notice(stderr, "if hc offers to copy its own build to the container, answer no: the image ships its own pinned hc")
+	}
 	if err := runOnTerminal(ctx, hcBin, hcMachineAddArgs(id)...); err != nil {
 		notice(stderr, "hc machine add failed: %v", err)
 		notice(stderr, "the container is up; register it with:")
 		notice(stderr, "  %s", addLine)
 		return
 	}
-	hcVersionNotice(ctx, hcBin, id, stderr)
+	if mismatch {
+		hcVersionNotice(stderr, local, remote)
+	}
 }
 
-// hcVersionNotice compares the Mac's hc with the one in the running
-// container. It asks the container directly: the version the local core
-// reports in `machine ls` is the one it last observed, which is stale right
-// after a rebuild.
-func hcVersionNotice(ctx context.Context, hcBin, id string, stderr io.Writer) {
-	local, err := exec.CommandContext(ctx, hcBin, "--version").Output()
+// hcVersions compares the Mac's hc with the one in the running container.
+// It asks the container directly: the version the local core reports in
+// `machine ls` is the one it last observed, which is stale right after a
+// rebuild. mismatch is false when either version can't be read.
+func hcVersions(ctx context.Context, hcBin, id string) (local, remote string, mismatch bool) {
+	localOut, err := exec.CommandContext(ctx, hcBin, "--version").Output()
 	if err != nil {
-		return
+		return "", "", false
 	}
-	remote, err := dockerOutput(ctx, "exec", containerName(id), "hc", "--version")
+	remoteOut, err := dockerOutput(ctx, "exec", containerName(id), "hc", "--version")
 	if err != nil {
-		return
+		return "", "", false
 	}
-	if local, remote, mismatch := hcVersionMismatch(string(local), remote); mismatch {
-		notice(stderr, "hc on this Mac is %s and the container has %s; bump the image pin with scripts/update-herdr-core.sh, then dev down and dev up", local, remote)
-	}
+	return hcVersionMismatch(string(localOut), remoteOut)
+}
+
+func hcVersionNotice(stderr io.Writer, local, remote string) {
+	notice(stderr, "hc on this Mac is %s and the container has %s; bump the image pin with scripts/update-herdr-core.sh in the env repo, then dev down and dev up", local, remote)
 }
 
 // runOnTerminal runs a command on the user's terminal so it can prompt.
