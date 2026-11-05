@@ -99,13 +99,6 @@ func hcVersion(output string) string {
 	return releaseFromVersion(output, "hc")
 }
 
-// releaseFromVersion reads the release out of `<name> --version` output.
-// Only the first line counts; later lines may carry build details.
-func releaseFromVersion(output, name string) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(output), "\n")
-	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), name+" "))
-}
-
 // hcVersionMismatch compares the Mac's `hc --version` output with the
 // container's.
 func hcVersionMismatch(localOutput, remoteOutput string) (string, string, bool) {
@@ -133,7 +126,7 @@ func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, 
 	switch action {
 	case hcRegistered:
 		status(cfg, stdout, "ok: hc machine %s is saved", id)
-		localOut, remoteOut := hcVersionOutputs(ctx, hcBin, id)
+		localOut, remoteOut := versionOutputs(ctx, cfg, hcBin, "hc", id)
 		if local, remote, mismatch := hcVersionMismatch(localOut, remoteOut); mismatch {
 			notice(stderr, "%s", hcVersionNoticeLine(local, remote))
 		}
@@ -156,7 +149,7 @@ func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, 
 	}
 
 	status(cfg, stdout, "register: hc machine %s", id)
-	for _, line := range hcPreAddNotices(hcVersionOutputs(ctx, hcBin, id)) {
+	for _, line := range hcPreAddNotices(versionOutputs(ctx, cfg, hcBin, "hc", id)) {
 		notice(stderr, "%s", line)
 	}
 	if err := runOnTerminal(ctx, hcBin, hcMachineAddArgs(id)...); err != nil {
@@ -166,30 +159,16 @@ func ensureHCMachine(ctx context.Context, cfg config, hcBin, id string, stdout, 
 	}
 }
 
-// hcVersionOutputs returns `hc --version` from the Mac and from the running
-// container, or "" for one that can't be read. It asks the container
-// directly: the version the local core reports in `machine ls` is the one it
-// last observed, which is stale right after a rebuild.
-func hcVersionOutputs(ctx context.Context, hcBin, id string) (localOut, remoteOut string) {
-	if out, err := exec.CommandContext(ctx, hcBin, "--version").Output(); err == nil {
-		localOut = string(out)
-	}
-	if out, err := dockerOutput(ctx, "exec", containerName(id), "hc", "--version"); err == nil {
-		remoteOut = out
-	}
-	return localOut, remoteOut
-}
-
 // hcPreAddNotices returns the lines to print before `hc machine add`. hc
 // offers to copy its own build to a remote whose hc is missing or a
 // different version, so the copy warning is skipped only when both versions
 // are known to match. A known mismatch also gets the pin-bump notice, before
 // the add so it shows even when the add fails.
 func hcPreAddNotices(localOut, remoteOut string) []string {
-	local, remote := hcVersion(localOut), hcVersion(remoteOut)
-	if local != "" && local == remote {
+	if versionsMatch(localOut, remoteOut, "hc") {
 		return nil
 	}
+	local, remote := hcVersion(localOut), hcVersion(remoteOut)
 	copyWarning := "if hc offers to copy its own build to the container, answer no: the image ships its own pinned hc"
 	if local == "" || remote == "" {
 		return []string{copyWarning + "; bump it with scripts/update-herdr-core.sh in the env repo"}
