@@ -95,10 +95,15 @@ func lookupHC(lookPath func(string) (string, error), home string) (string, bool)
 }
 
 // hcVersion reads the release out of `hc --version` output ("hc 0.1.17").
-// Only the first line counts; later lines may carry build details.
 func hcVersion(output string) string {
+	return releaseFromVersion(output, "hc")
+}
+
+// releaseFromVersion reads the release out of `<name> --version` output.
+// Only the first line counts; later lines may carry build details.
+func releaseFromVersion(output, name string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(output), "\n")
-	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "hc "))
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), name+" "))
 }
 
 // hcVersionMismatch compares the Mac's `hc --version` output with the

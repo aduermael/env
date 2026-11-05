@@ -294,7 +294,7 @@ herdr machine add devenv-<id> --label "<id>" --remote-session default
 
 Skip `machine add` when the JSON list already contains that SSH target. Match the target, not the label. A renamed label is still the same machine. The spike records the exact JSON fields from `herdr machine list --json` on the client version under test, and confirms the saved target is the alias `devenv-<id>`. Herdr's machine is the string it stored. A saved alias keeps the same machine when only the port behind that alias changes. A saved `127.0.0.1` and port means the recorded port is part of the machine and must stay fixed.
 
-`machine add` may prompt before it installs or replaces a remote server. Run it on the user's terminal so they can answer. The image already contains a compatible `herdr`, so a prompt to install means the Mac client rejected the pinned binary. Do not accept an install into `~/.local/bin`. Stop and bump the image pin with `scripts/update-herdr.sh` so the server stays the image binary.
+`machine add` may prompt before it installs or replaces a remote server. Run it on the user's terminal so they can answer. The image already contains a compatible `herdr`, so a prompt to install means the Mac client rejected the pinned binary. Do not accept an install into `~/.local/bin`. Stop and bump the image pin with `scripts/update-herdr.sh` so the server stays the image binary. `dev up` prints that warning before `machine add` unless the Mac's `herdr --version` and the container's are known to match, since a matching server leaves nothing to install.
 
 `machine add` starts the remote `default` session when it is not already running, then saves the profile. An open local `herdr` shows the new machine within about a second.
 

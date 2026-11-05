@@ -1059,12 +1059,35 @@ func ensureHerdrMachine(ctx context.Context, cfg config, herdrBin, id string, st
 	}
 
 	status(cfg, stdout, "register: Herdr machine %s", id)
-	notice(stderr, "if Herdr offers to install a server into ~/.local/bin, answer no: the image already ships herdr, bump HERDR_VERSION with scripts/update-herdr.sh instead")
+	if !herdrVersionsMatch(herdrVersionOutputs(ctx, herdrBin, id)) {
+		notice(stderr, "if Herdr offers to install a server into ~/.local/bin, answer no: the image already ships herdr, bump HERDR_VERSION with scripts/update-herdr.sh in the env repo instead")
+	}
 	if err := runOnTerminal(ctx, herdrBin, herdrMachineAddArgs(id)...); err != nil {
 		notice(stderr, "herdr machine add failed: %v", err)
 		notice(stderr, "the container is up; register it with:")
 		notice(stderr, "  %s", addLine)
 	}
+}
+
+// herdrVersionOutputs returns `herdr --version` from the Mac and from the
+// running container, or "" for one that can't be read.
+func herdrVersionOutputs(ctx context.Context, herdrBin, id string) (localOut, remoteOut string) {
+	if out, err := exec.CommandContext(ctx, herdrBin, "--version").Output(); err == nil {
+		localOut = string(out)
+	}
+	if out, err := dockerOutput(ctx, "exec", containerName(id), "herdr", "--version"); err == nil {
+		remoteOut = out
+	}
+	return localOut, remoteOut
+}
+
+// herdrVersionsMatch reports whether both herdr versions are known and equal.
+// Only then can machine add not offer to install a server, so the install
+// warning is skipped. Herdr accepts a client and server on different
+// releases, so a mismatch keeps the warning but is not itself a problem.
+func herdrVersionsMatch(localOut, remoteOut string) bool {
+	local := releaseFromVersion(localOut, "herdr")
+	return local != "" && local == releaseFromVersion(remoteOut, "herdr")
 }
 
 func terminalFile(file *os.File) bool {
