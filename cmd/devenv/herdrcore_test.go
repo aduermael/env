@@ -91,6 +91,22 @@ func TestHCVersionMismatch(t *testing.T) {
 	}
 }
 
+func TestHCPreAddNotices(t *testing.T) {
+	if lines := hcPreAddNotices("hc 0.1.18\n", "hc 0.1.18\n"); len(lines) != 0 {
+		t.Fatalf("matching versions must not warn, got %q", lines)
+	}
+	lines := hcPreAddNotices("hc 0.1.18\n", "hc 0.1.17\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "0.1.18") || !strings.Contains(lines[0], "update-herdr-core.sh") || !strings.Contains(lines[1], "answer no") {
+		t.Fatalf("mismatch must give the version notice then the copy warning, got %q", lines)
+	}
+	for _, c := range [][2]string{{"hc 0.1.18\n", ""}, {"", "hc 0.1.18\n"}, {"", ""}} {
+		lines := hcPreAddNotices(c[0], c[1])
+		if len(lines) != 1 || !strings.Contains(lines[0], "answer no") || !strings.Contains(lines[0], "update-herdr-core.sh") {
+			t.Fatalf("unknown version %q/%q must warn, got %q", c[0], c[1], lines)
+		}
+	}
+}
+
 func TestHCMachineActionNameTaken(t *testing.T) {
 	// Fixture entry 4 is named env-root-a1b2c3 but targets other-host; with
 	// the real entry gone, that name blocks the add.
