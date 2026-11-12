@@ -630,9 +630,9 @@ RUN set -eux; \
 # Terraform is pinned to a concrete stable HashiCorp release. Keep this layer
 # after the Dagger CLI so version bumps only rebuild this install and the cheap
 # final setup.
-ARG TERRAFORM_VERSION=1.17.1
-ARG TERRAFORM_SHA256_AMD64=4638628058e71a55212b1c563712eac03b902128f40740f3dc8174df12135061
-ARG TERRAFORM_SHA256_ARM64=988e950a1c23058093b0e66ab2d5fb53fc18345ecfbd5871acf51dbac9325edd
+ARG TERRAFORM_VERSION=1.17.2
+ARG TERRAFORM_SHA256_AMD64=e6f16b2f0b137ee5729caa8c4e79a3bae4ee261acd198a1fcfa8584a6296605b
+ARG TERRAFORM_SHA256_ARM64=858e08c181a76b6b223e8c767a8e983922eebe2d062db949a2de66ce040c368c
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
