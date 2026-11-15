@@ -52,6 +52,9 @@ type config struct {
 	NoZshrc       bool
 	Quiet         bool
 	DeleteData    bool
+	Tunnel        bool
+	TunnelSet     bool
+	PublicTunnel  *tunnelState
 }
 
 type bridgeConfig struct {
@@ -61,9 +64,17 @@ type bridgeConfig struct {
 }
 
 type containerInspect struct {
+	Mounts []struct{ Type, Source, Destination string } `json:"Mounts"`
 	Config struct {
 		Labels map[string]string `json:"Labels"`
+		Env    []string          `json:"Env"`
 	} `json:"Config"`
+	NetworkSettings struct {
+		Networks map[string]struct {
+			Aliases []string `json:"Aliases"`
+		} `json:"Networks"`
+		Ports map[string][]struct{ HostIP, HostPort string } `json:"Ports"`
+	} `json:"NetworkSettings"`
 	State struct {
 		Running bool `json:"Running"`
 		Health  *struct {
@@ -93,6 +104,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	switch cmd {
+	case "tunnel":
+		return tunnelCommand(ctx, args, stdout, stderr)
 	case "setup":
 		cfg, err := parseSetupFlags(args)
 		if err != nil {
@@ -211,12 +224,18 @@ func parseUpFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.ProxyContainer, "proxy-container", cfg.ProxyContainer, "safe Docker socket proxy container name")
 	fs.StringVar(&cfg.ProxyPort, "proxy-port", cfg.ProxyPort, "localhost port for the safe Docker socket proxy")
 	fs.BoolVar(&cfg.Quiet, "quiet", false, "reduce status output")
+	fs.BoolVar(&cfg.Tunnel, "tunnel", false, "enable public tunnel; --tunnel=false suspends the existing allocation")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
 	if fs.NArg() != 0 {
 		return config{}, fmt.Errorf("up does not accept positional arguments: %s", strings.Join(fs.Args(), " "))
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "tunnel" {
+			cfg.TunnelSet = true
+		}
+	})
 	return normalizeConfig(cfg)
 }
 
@@ -407,6 +426,17 @@ func setup(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 }
 
 func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
+	if err := validateConfiguredTunnelPaths(cfg, nil); err != nil {
+		return err
+	}
+	unlockTunnels, err := lockTunnels()
+	if err != nil {
+		return err
+	}
+	defer unlockTunnels()
+	if err := stopRootTunnels(ctx, cfg); err != nil {
+		return err
+	}
 	status(cfg, stdout, "check: Docker CLI and daemon")
 	if err := dockerCheck(ctx); err != nil {
 		return err
@@ -1319,6 +1349,7 @@ func printUsage(w io.Writer) {
   %[1]s up [flags]
   %[1]s stop [flags]
   %[1]s down [flags]
+  %[1]s tunnel configure|status|retire [flags]
 
 Commands:
   setup    Prepare ~/.devenv, build the dev image, start the socket proxy, and install zsh functions.
@@ -1339,6 +1370,7 @@ Setup flags:
   --no-zshrc                 Skip zshrc installation.
 
 Up flags:
+  --tunnel                  Enable a stable public tunnel for this worktree; --tunnel=false suspends it.
   --image string             Local dev image tag (default %q or DEVENV_IMAGE).
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
   --host-socket path         Host Docker socket to proxy (or DEVENV_HOST_DOCKER_SOCKET).

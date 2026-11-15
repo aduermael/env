@@ -244,6 +244,7 @@ scripts/update-herdr-core.sh 0.1.17
 devenv setup [flags]
 devenv up [flags]
 devenv stop [flags]
+devenv tunnel configure|status|retire [flags]
 devenv down [flags]
 ```
 
@@ -272,7 +273,8 @@ panes on it. Outside a git worktree it fails. The generated `dev up` calls
 `devenv up --quiet`, so normal preflight checks stay silent unless something
 fails. Lines that name a command to run are printed regardless.
 
-`devenv stop` removes the current worktree's container and nothing else. The
+`devenv stop` removes the current worktree's container and stops its native tunnel
+process and relay, retaining its Cloudflare allocation and URLs. The
 generated `dev down` calls it. With no container running it succeeds.
 
 `devenv down` removes every managed runtime container, including the proxy
@@ -633,3 +635,115 @@ extension, so older Git versions will reject those repositories.
 ```sh
 docker build -f dev.Dockerfile -t local-dev:latest .
 ```
+
+## Optional public worktree URLs
+
+Public ingress is **off by default**. The macOS host owns Cloudflare credentials,
+allocation, and a native `cloudflared` process. The workspace receives only public
+metadata. Install [cloudflared 2025.4.0 or newer](https://developers.cloudflare.com/tunnel/downloads/)
+(`brew install cloudflared`) and use a local Docker Desktop Unix-socket context.
+Remote Docker contexts cannot reach this host's loopback relay.
+
+Create a Cloudflare API token restricted to the development account with
+Cloudflare Tunnel edit access and the development zone with DNS edit and zone
+read access. Store it in a mode-600 file outside both the env state root
+(`~/.devenv` by default) and every repository mounted into a workspace. Do not put
+it in this checkout. Configure the host once:
+
+```sh
+devenv tunnel configure \
+  --account-id YOUR_ACCOUNT_ID \
+  --zone-id YOUR_ZONE_ID \
+  --domain ok-houston.dev \
+  --api-token-file "$HOME/.config/devenv-secrets/cloudflare-api-token" \
+  --origin http://houston:80
+```
+
+The domain must exactly match the Cloudflare zone. The origin is one HTTP Docker
+network alias and explicit port. For a server running directly inside the
+workspace, omit `--origin` to use `http://workspace:8080`. Houston instead attaches
+its sibling proxy as `houston` on the provided ingress network. An optional
+`--cloudflared /absolute/path` selects the native executable.
+
+From the desired worktree on the **host**:
+
+```sh
+devenv up --tunnel
+devenv tunnel status
+```
+
+The Cloudflare-assigned random tunnel UUID becomes the deployment identity:
+`https://UUID.ok-houston.dev` and `https://files-UUID.ok-houston.dev`. There is one
+allocation per canonical worktree Git directory; duplicate human-readable tree
+names do not collide. Plain `devenv up` reuses the enabled allocation and URLs.
+Stop a workspace before enabling or disabling ingress, or moving its checkout.
+Moving a stopped linked worktree while retaining its Git directory preserves the
+binding. Moving the repository's Git directory changes that identity; stop and
+retire the old allocation before such a move.
+
+The workspace receives exactly these ingress settings:
+
+| Setting | Value |
+| --- | --- |
+| `DEVENV_INSTANCE_ID` | Canonical tunnel UUID |
+| `DEVENV_PUBLIC_URL` | HTTPS application origin |
+| `DEVENV_FILES_URL` | HTTPS file origin |
+| `DEVENV_INGRESS_NETWORK` | `devenv-ingress-UUID` |
+
+The external bridge network has label `io.devenv.instance=UUID`. Each allocation
+has its own network; its relay never joins the shared Docker proxy network.
+Native cloudflared routes the two exact hosts to a credential-free TCP relay
+published on **127.0.0.1 only**, which forwards to the configured origin and
+preserves the HTTP Host header. All other tunnel hosts return 404. The loopback
+port is necessary to bridge native host cloudflared to Docker; it is not a public
+host port. No API token or runtime tunnel token is placed in Docker environment,
+arguments, mounts, or volumes.
+
+The shared Docker API assumes trusted workspaces. Keeping credentials on the host
+prevents ordinary workspace file/container inspection from exposing them; it is
+not isolation against a malicious workspace with Docker API access. Use a
+dedicated development account and zone, and do not treat this environment as a
+hostile-code sandbox.
+
+```sh
+devenv stop                 # Stop this workspace and native connector; retain URLs.
+devenv up                   # Restart the same enabled allocation.
+devenv stop
+devenv up --tunnel=false    # Run privately; retain the allocation for later reuse.
+devenv tunnel retire        # Stop ingress and delete only its owned DNS/tunnel.
+```
+
+After retirement, stop any remaining workspace and explicitly run
+`devenv up --tunnel` to allocate new URLs. Plain `up` remains private. Retirement
+refuses DNS records that were reassigned. Interrupted provisioning and retirement
+can be retried; keep the private state so retries recover the original allocation.
+Changing the configured origin takes effect on the next stopped workspace start,
+preserving its UUID and URLs. Stop the workspace before changing its origin.
+Existing bindings retain their account, zone, and domain; restore the original
+host settings or retire before changing those properties.
+
+Host settings, runtime tokens, logs, and allocation records live outside workspace
+mounts under `~/Library/Application Support/devenv-tunnels` on macOS. Set
+`DEVENV_TUNNEL_HOME` consistently to choose another private host directory. Paths
+are checked after resolving symlinks. `devenv down`, including `--delete-data`,
+retains this directory and Cloudflare allocations. Keep it when clearing workspace
+data; use `tunnel retire` for intentional remote cleanup. The native process is
+identified by its executable, private token-file path, and process start identity
+before shutdown; stop runs before removing the relay.
+
+Validate the CLI with `go test ./...` and `go vet ./...`. The opt-in
+`DEVENV_TEST_DOCKER=1 go test ./cmd/devenv -run '^TestTunnelDockerRelay$' -v`
+exercises actual app/file Host routing through the Docker relay and its restart.
+It requires Docker and pulls `alpine/socat:1.8.0.3`; it creates and cleans up isolated
+fixture containers/network without Cloudflare credentials. Live native-host
+loopback and public HTTPS acceptance still require a configured macOS host.
+
+The tracked `bin/devenv` executable targets macOS ARM64 (Git LFS); the root
+`devenv` artifact targets Linux ARM64. Rebuild both after CLI source changes:
+
+```sh
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o bin/devenv ./cmd/devenv
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o devenv ./cmd/devenv
+```
+
+Run `devenv setup` using the new binary to update the installed host copy.
