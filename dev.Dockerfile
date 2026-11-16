@@ -481,9 +481,9 @@ RUN set -eux; \
 # bin/codex, bin/codex-code-mode-host, codex-package.json, codex-path/rg, and
 # codex-resources/bwrap. Installing the bare codex-${target} binary alone
 # makes `codex` exit with "this CLI has no complete local package".
-ARG CODEX_VERSION=rust-v0.167.2
-ARG CODEX_SHA256_AMD64=3d77be1748d35a4bb0e7f8752cde3b11890c63338e8c599f01eafa4a59e17b3d
-ARG CODEX_SHA256_ARM64=56b08c1214e062a5b61684bacb5033c4372a01062a47c87c49a32be83af70695
+ARG CODEX_VERSION=rust-v0.169.0
+ARG CODEX_SHA256_AMD64=3b8ed091149cc63a59046b9f094bcfa21cdb4dda15ede441ce369bcee4a71ba0
+ARG CODEX_SHA256_ARM64=c8d0b4ab2a97c595b70b10412d36d0d5464dcef1e1d3246b073d48017cdf5a4f
 RUN set -eux; \
     image_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${image_arch}" in \
