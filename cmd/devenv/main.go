@@ -66,6 +66,7 @@ type bridgeConfig struct {
 type containerInspect struct {
 	Mounts []struct{ Type, Source, Destination string } `json:"Mounts"`
 	Config struct {
+		Image  string            `json:"Image"`
 		Labels map[string]string `json:"Labels"`
 		Env    []string          `json:"Env"`
 	} `json:"Config"`
@@ -73,7 +74,6 @@ type containerInspect struct {
 		Networks map[string]struct {
 			Aliases []string `json:"Aliases"`
 		} `json:"Networks"`
-		Ports map[string][]struct{ HostIP, HostPort string } `json:"Ports"`
 	} `json:"NetworkSettings"`
 	State struct {
 		Running bool `json:"Running"`

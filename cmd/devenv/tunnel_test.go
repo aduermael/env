@@ -7,11 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 const testTunnelID = "01234567-89ab-4cde-8f01-23456789abcd"
@@ -191,13 +189,13 @@ func TestTunnelRoutingAndMetadata(t *testing.T) {
 			t.Fatal(err)
 		}
 		rules := body.Config.Ingress
-		if len(rules) != 3 || rules[0]["hostname"] != state.appHost() || rules[1]["hostname"] != state.filesHost() || rules[0]["service"] != "http://127.0.0.1:12345" || rules[1]["service"] != rules[0]["service"] || rules[2]["service"] != "http_status:404" {
+		if len(rules) != 3 || rules[0]["hostname"] != state.appHost() || rules[1]["hostname"] != state.filesHost() || rules[0]["service"] != state.Origin || rules[1]["service"] != rules[0]["service"] || rules[2]["service"] != "http_status:404" {
 			t.Errorf("invalid routes: %+v", rules)
 		}
 		fmt.Fprint(w, `{"success":true,"result":{}}`)
 	}))
 	defer server.Close()
-	if err := (cloudflareAPI{base: server.URL, client: server.Client()}).route(context.Background(), state, "12345"); err != nil {
+	if err := (cloudflareAPI{base: server.URL, client: server.Client()}).route(context.Background(), state); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config{Root: "/env", PublicTunnel: &state}
@@ -208,10 +206,6 @@ func TestTunnelRoutingAndMetadata(t *testing.T) {
 			t.Errorf("missing metadata %s", value)
 		}
 	}
-	relay := strings.Join(relayArgs(state), " ")
-	if !strings.Contains(relay, "127.0.0.1::8080") || !strings.Contains(relay, "TCP:houston:80") {
-		t.Fatal(relay)
-	}
 	for _, input := range []struct {
 		args         []string
 		set, enabled bool
@@ -220,77 +214,6 @@ func TestTunnelRoutingAndMetadata(t *testing.T) {
 		if err != nil || cfg.TunnelSet != input.set || cfg.Tunnel != input.enabled {
 			t.Fatalf("flags %v: %+v %v", input.args, cfg, err)
 		}
-	}
-}
-
-func TestTunnelProcessHelper(t *testing.T) {
-	if os.Getenv("DEVENV_TEST_NATIVE_PROCESS") != "1" {
-		return
-	}
-	time.Sleep(time.Minute)
-	os.Exit(0)
-}
-func TestTunnelProcessOwnership(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestTunnelProcessHelper$")
-	cmd.Env = append(os.Environ(), "DEVENV_TEST_NATIVE_PROCESS=1")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer cmd.Process.Kill()
-	defer cmd.Wait()
-	identity, err := processIdentity(cmd.Process.Pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := &tunnelProcess{PID: cmd.Process.Pid, Identity: identity + "stale"}
-	if err = stopTunnelProcess(stale); err != nil {
-		t.Fatal(err)
-	}
-	real := &tunnelProcess{PID: cmd.Process.Pid, Identity: identity}
-	if !tunnelProcessRunning(real) {
-		t.Fatal("stale identity killed unrelated process")
-	}
-	if err = stopTunnelProcess(real); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestNativeTunnelCrashRecovery(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "host private")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	source := filepath.Join(dir, "native.go")
-	binary := filepath.Join(dir, "cloudflared")
-	code := `package main
-import("fmt";"os";"time")
-func main(){if len(os.Args)>1 && os.Args[1]=="--version" {fmt.Println("cloudflared version 2025.4.0");return};for {time.Sleep(time.Second)}}`
-	if err := os.WriteFile(source, []byte(code), 0600); err != nil {
-		t.Fatal(err)
-	}
-	build := exec.Command("go", "build", "-o", binary, source)
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build native fixture: %s %v", output, err)
-	}
-	got, err := nativeCloudflared(tunnelSettings{Cloudflared: binary})
-	if err != nil || got != binary {
-		t.Fatalf("native prerequisite: %s %v", got, err)
-	}
-	tokenPath := filepath.Join(dir, "runtime-token")
-	cmd := exec.Command(binary, "tunnel", "--no-autoupdate", "run", "--token-file", tokenPath)
-	if err = cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer cmd.Process.Kill()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	if err = recoverTunnelProcesses(tunnelState{Binary: binary}, filepath.Join(dir, "state.json")); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("unrecorded native connector survived recovery")
 	}
 }
 
@@ -418,12 +341,8 @@ esac
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(docker), 0700); err != nil {
 		t.Fatal(err)
 	}
-	cloudflared := filepath.Join(bin, "cloudflared")
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\nprintf 'cloudflared version 2025.4.0\\n'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	settings := tunnelSettings{AccountID: strings.Repeat("a", 32), ZoneID: strings.Repeat("b", 32), Domain: "example.dev", TokenFile: filepath.Join(home, "api-token"), Cloudflared: cloudflared, Origin: "http://workspace:8080"}
+	settings := tunnelSettings{AccountID: strings.Repeat("a", 32), ZoneID: strings.Repeat("b", 32), Domain: "example.dev", TokenFile: filepath.Join(home, "api-token"), Origin: "http://workspace:8080"}
 	if err := writePrivate(settings.TokenFile, []byte("fixture-api-token")); err != nil {
 		t.Fatal(err)
 	}

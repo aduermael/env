@@ -1,55 +1,21 @@
-// Native cloudflared keeps bearer credentials outside workspace mounts.
-// A credential-free relay publishes only on host loopback and joins
-// one dedicated ingress network. Process identity checks protect against PID reuse.
+// The host CLI manages a cloudflared sidecar on each workspace's ingress network.
+// Only the sidecar mounts the private runtime token; workspace metadata is public.
 package main
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 )
 
-const tunnelRelayImage = "alpine/socat:1.8.0.3"
+const tunnelImage = "cloudflare/cloudflared:2026.11.0"
+const tunnelTokenPath = "/run/devenv-tunnel-token"
 
-type tunnelProcess struct {
-	PID      int    `json:"pid"`
-	Identity string `json:"identity"`
-}
-
-func nativeCloudflared(settings tunnelSettings) (string, error) {
-	binary := settings.Cloudflared
-	if binary == "" {
-		binary = "cloudflared"
-	}
-	path, err := exec.LookPath(binary)
-	if err != nil {
-		return "", errors.New("native cloudflared 2025.4.0 or newer is required; install it on the host (brew install cloudflared), or configure --cloudflared")
-	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	output, err := exec.Command(path, "--version").Output()
-	if err != nil {
-		return "", fmt.Errorf("check native cloudflared version: %w", err)
-	}
-	for _, field := range strings.Fields(string(output)) {
-		var year, month, patch int
-		if _, err := fmt.Sscanf(field, "%d.%d.%d", &year, &month, &patch); err == nil && (year > 2025 || year == 2025 && month >= 4) {
-			return path, nil
-		}
-	}
-	return "", errors.New("cloudflared 2025.4.0 or newer is required for host-only --token-file")
-}
 func requireLocalDocker(ctx context.Context) error {
 	endpoint := os.Getenv("DOCKER_HOST")
 	contextName := os.Getenv("DOCKER_CONTEXT")
@@ -66,116 +32,39 @@ func requireLocalDocker(ctx context.Context) error {
 		endpoint = strings.TrimSpace(out)
 	}
 	if !strings.HasPrefix(endpoint, "unix://") {
-		return errors.New("native tunnels require a local Docker Desktop Unix-socket context; remote Docker endpoints cannot use the host loopback relay")
-	}
-	return nil
-}
-func processIdentity(pid int) (string, error) {
-	if pid < 2 {
-		return "", errors.New("invalid tunnel process ID")
-	}
-	output, err := exec.Command("ps", "-ww", "-p", strconv.Itoa(pid), "-o", "lstart=", "-o", "command=").Output()
-	return strings.TrimSpace(string(output)), err
-}
-func tunnelProcessRunning(p *tunnelProcess) bool {
-	if p == nil || p.Identity == "" {
-		return false
-	}
-	actual, err := processIdentity(p.PID)
-	return err == nil && actual == p.Identity
-}
-func stopTunnelProcess(p *tunnelProcess) error {
-	if !tunnelProcessRunning(p) {
-		return nil
-	}
-	process, err := os.FindProcess(p.PID)
-	if err != nil {
-		return err
-	}
-	if err = process.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		return err
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if !tunnelProcessRunning(p) {
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if tunnelProcessRunning(p) {
-		if err = process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			return err
-		}
-		deadline = time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			if !tunnelProcessRunning(p) {
-				return nil
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-		return errors.New("native cloudflared has not exited; retaining relay to prevent stale port reuse")
-	}
-	return nil
-}
-func stopTunnelRuntime(ctx context.Context, s tunnelState, path string) error {
-	if err := stopTunnelProcess(s.Process); err != nil {
-		return err
-	}
-	if err := recoverTunnelProcesses(s, path); err != nil {
-		return err
-	}
-	if s.ID == "" {
-		return nil
-	}
-	info, exists, err := inspectContainer(ctx, s.relay())
-	if err != nil {
-		return err
-	}
-	if exists {
-		if !ownsTunnelContainer(info, s) {
-			return errors.New("ingress relay belongs to another allocation; refusing removal")
-		}
-		if _, err = dockerOutput(ctx, "rm", "-f", s.relay()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Recover a process started immediately before a CLI crash, before its PID was
-// saved. The exact executable and private token path identify only this binding.
-func recoverTunnelProcesses(s tunnelState, path string) error {
-	if s.Binary == "" {
-		return nil
-	}
-	output, err := exec.Command("ps", "-ww", "-axo", "pid=,command=").Output()
-	if err != nil {
-		return err
-	}
-	want := s.Binary + " tunnel --no-autoupdate run --token-file " + filepath.Join(filepath.Dir(path), "runtime-token")
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		pidText, command, ok := strings.Cut(line, " ")
-		if !ok || strings.TrimSpace(command) != want {
-			continue
-		}
-		pid, err := strconv.Atoi(pidText)
-		if err != nil {
-			return err
-		}
-		identity, err := processIdentity(pid)
-		if err != nil {
-			continue
-		}
-		if err := stopTunnelProcess(&tunnelProcess{PID: pid, Identity: identity}); err != nil {
-			return err
-		}
+		return errors.New("tunnel token mounts require the host's local Docker Unix-socket context")
 	}
 	return nil
 }
 func ownsTunnelContainer(info containerInspect, s tunnelState) bool {
 	l := info.Config.Labels
-	return l[labelManaged] == "true" && l[labelRole] == "tunnel-relay" && l[tunnelInstanceLabel] == s.ID && l[labelWorktreeGitDir] == s.GitDir && l[labelRoot] == s.Root
+	return l[labelManaged] == "true" && l[labelRole] == "tunnel" && l[tunnelInstanceLabel] == s.ID && l[labelWorktreeGitDir] == s.GitDir && l[labelRoot] == s.Root
+}
+func (s tunnelState) checkRuntimeUpgrade() error {
+	if len(s.LegacyProcess) > 0 && string(s.LegacyProcess) != "null" {
+		return errors.New("stop this tunnel with the previous native-runtime version of devenv before upgrading")
+	}
+	return nil
+}
+func stopTunnelRuntime(ctx context.Context, s tunnelState) error {
+	if err := s.checkRuntimeUpgrade(); err != nil {
+		return err
+	}
+	if s.ID == "" {
+		return nil
+	}
+	info, exists, err := inspectContainer(ctx, s.container())
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if !ownsTunnelContainer(info, s) {
+		return errors.New("tunnel container belongs to another allocation; refusing removal")
+	}
+	_, err = dockerOutput(ctx, "rm", "-f", s.container())
+	return err
 }
 func ensureTunnelNetwork(ctx context.Context, s tunnelState) error {
 	out, err := dockerOutput(ctx, "network", "inspect", s.network(), "--format", `{{.Driver}} {{.Internal}} {{index .Labels "io.devenv.instance"}} {{index .Labels "com.aduermael.env.devenv.worktree-gitdir"}}`)
@@ -197,92 +86,47 @@ func ensureTunnelNetwork(ctx context.Context, s tunnelState) error {
 	}
 	return nil
 }
-func relayArgs(s tunnelState) []string {
-	u, _ := url.Parse(s.Origin)
-	return []string{"run", "-d", "--name", s.relay(), "--restart", "unless-stopped", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "65534:65534", "--label", labelManaged + "=true", "--label", labelRole + "=tunnel-relay", "--label", labelRoot + "=" + s.Root, "--label", labelWorktreeGitDir + "=" + s.GitDir, "--label", tunnelInstanceLabel + "=" + s.ID, "--network", s.network(), "-p", "127.0.0.1::8080", tunnelRelayImage, "TCP-LISTEN:8080,fork,reuseaddr", "TCP:" + u.Hostname() + ":" + u.Port()}
+func tunnelArgs(s tunnelState, path string) []string {
+	token := filepath.Join(filepath.Dir(path), "runtime-token")
+	var mount strings.Builder
+	w := csv.NewWriter(&mount)
+	_ = w.Write([]string{"type=bind", "source=" + token, "target=" + tunnelTokenPath, "readonly"})
+	w.Flush()
+	return []string{"run", "-d", "--name", s.container(), "--restart", "unless-stopped", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--label", labelManaged + "=true", "--label", labelRole + "=tunnel", "--label", labelRoot + "=" + s.Root, "--label", labelWorktreeGitDir + "=" + s.GitDir, "--label", tunnelInstanceLabel + "=" + s.ID, "--network", s.network(), "--mount", strings.TrimSuffix(mount.String(), "\n"), tunnelImage, "tunnel", "--no-autoupdate", "run", "--token-file", tunnelTokenPath}
 }
-func relayPort(info containerInspect) (string, error) {
-	bindings := info.NetworkSettings.Ports["8080/tcp"]
-	if len(bindings) != 1 || bindings[0].HostIP != "127.0.0.1" {
-		return "", errors.New("ingress relay must publish exactly one loopback port")
+func startTunnelRuntime(ctx context.Context, s *tunnelState, path string, api cloudflareAPI) error {
+	if err := s.checkRuntimeUpgrade(); err != nil {
+		return err
 	}
-	n, err := strconv.Atoi(bindings[0].HostPort)
-	if err != nil || n < 1 || n > 65535 {
-		return "", errors.New("invalid ingress relay port")
-	}
-	return bindings[0].HostPort, nil
-}
-func startTunnelRuntime(ctx context.Context, s *tunnelState, path, binary string, api cloudflareAPI) error {
 	if err := ensureTunnelNetwork(ctx, *s); err != nil {
 		return err
 	}
-	info, exists, err := inspectContainer(ctx, s.relay())
+	info, exists, err := inspectContainer(ctx, s.container())
 	if err != nil {
 		return err
 	}
 	if exists && !ownsTunnelContainer(info, *s) {
-		return errors.New("ingress relay name is already owned by another worktree")
+		return errors.New("tunnel container belongs to another allocation")
 	}
-	if exists && info.State.Running && tunnelProcessRunning(s.Process) {
-		_, err = relayPort(info)
+	if err := api.route(ctx, *s); err != nil {
 		return err
 	}
-	if err = stopTunnelRuntime(ctx, *s, path); err != nil {
+	if exists && info.State.Running && info.Config.Image == tunnelImage {
+		return nil
+	}
+	if err = stopTunnelRuntime(ctx, *s); err != nil {
 		return err
 	}
-	s.Process = nil
-	s.Binary = binary
-	if err = writePrivateJSON(path, s); err != nil {
+	if _, err = dockerOutput(ctx, tunnelArgs(*s, path)...); err != nil {
 		return err
 	}
-	if _, err = dockerOutput(ctx, relayArgs(*s)...); err != nil {
-		return err
-	}
-	info, exists, err = inspectContainer(ctx, s.relay())
+	info, exists, err = inspectContainer(ctx, s.container())
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return errors.New("ingress relay did not start")
+	if !exists || !info.State.Running {
+		return fmt.Errorf("tunnel container did not stay running; inspect docker logs %s", s.container())
 	}
-	port, err := relayPort(info)
-	if err != nil {
-		return err
-	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), 5*time.Second)
-	if err != nil {
-		return fmt.Errorf("local relay unavailable: %w", err)
-	}
-	conn.Close()
-	if err = api.route(ctx, *s, port); err != nil {
-		return err
-	}
-	tokenPath := filepath.Join(filepath.Dir(path), "runtime-token")
-	log, err := os.OpenFile(filepath.Join(filepath.Dir(path), "cloudflared.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		return err
-	}
-	defer log.Close()
-	cmd := exec.Command(binary, "tunnel", "--no-autoupdate", "run", "--token-file", tokenPath)
-	cmd.Stdout = log
-	cmd.Stderr = log
-	detachCommand(cmd)
-	if err = cmd.Start(); err != nil {
-		return err
-	}
-	identity, err := processIdentity(cmd.Process.Pid)
-	if err != nil || !strings.Contains(identity, tokenPath) {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return errors.New("native cloudflared exited before its ownership could be recorded; inspect private cloudflared.log")
-	}
-	s.Process = &tunnelProcess{PID: cmd.Process.Pid, Identity: identity}
-	if err = writePrivateJSON(path, s); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return err
-	}
-	_ = cmd.Process.Release()
 	return nil
 }
 func workspaceTunnelMatches(info containerInspect, s *tunnelState) bool {
@@ -310,6 +154,11 @@ func prepareTunnel(ctx context.Context, cfg config, wt worktree) (*tunnelState, 
 	if state != nil && state.Root != cfg.Root {
 		return nil, errors.New("this worktree's tunnel belongs to a different devenv root; reuse its original --root")
 	}
+	if state != nil {
+		if err = state.checkRuntimeUpgrade(); err != nil {
+			return nil, err
+		}
+	}
 	enabled := state != nil && state.Enabled && !state.Retired
 	if cfg.TunnelSet {
 		enabled = cfg.Tunnel
@@ -334,11 +183,10 @@ func prepareTunnel(ctx context.Context, cfg config, wt worktree) (*tunnelState, 
 	}
 	if !enabled {
 		if state != nil {
-			if err = stopTunnelRuntime(ctx, *state, path); err != nil {
+			if err = stopTunnelRuntime(ctx, *state); err != nil {
 				return nil, err
 			}
 			state.Enabled = false
-			state.Process = nil
 			if err = writePrivateJSON(path, state); err != nil {
 				return nil, err
 			}
@@ -359,10 +207,6 @@ func prepareTunnel(ctx context.Context, cfg config, wt worktree) (*tunnelState, 
 		return nil, err
 	}
 	if err = requireLocalDocker(ctx); err != nil {
-		return nil, err
-	}
-	binary, err := nativeCloudflared(settings)
-	if err != nil {
 		return nil, err
 	}
 	api, err := tunnelAPI(settings)
@@ -392,7 +236,7 @@ func prepareTunnel(ctx context.Context, cfg config, wt worktree) (*tunnelState, 
 	if err = api.allocate(ctx, state, path); err != nil {
 		return nil, err
 	}
-	if err = startTunnelRuntime(ctx, state, path, binary, api); err != nil {
+	if err = startTunnelRuntime(ctx, state, path, api); err != nil {
 		return nil, err
 	}
 	return state, nil
@@ -405,10 +249,9 @@ func stopWorktreeTunnel(ctx context.Context, cfg config, wt worktree) error {
 	if state.Root != cfg.Root {
 		return errors.New("this worktree's tunnel belongs to a different devenv root; reuse its original --root")
 	}
-	if err = stopTunnelRuntime(ctx, *state, path); err != nil {
+	if err = stopTunnelRuntime(ctx, *state); err != nil {
 		return err
 	}
-	state.Process = nil
 	return writePrivateJSON(path, state)
 }
 func stopRootTunnels(ctx context.Context, cfg config) error {
@@ -428,10 +271,9 @@ func stopRootTunnels(ctx context.Context, cfg config) error {
 		if state.Root != cfg.Root {
 			continue
 		}
-		if err = stopTunnelRuntime(ctx, state, path); err != nil {
+		if err = stopTunnelRuntime(ctx, state); err != nil {
 			return err
 		}
-		state.Process = nil
 		if err = writePrivateJSON(path, state); err != nil {
 			return err
 		}

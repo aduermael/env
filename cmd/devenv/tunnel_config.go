@@ -1,5 +1,5 @@
 // Optional public ingress belongs to the host. Only non-secret instance metadata
-// enters a workspace; Cloudflare settings, runtime tokens and process records
+// enters a workspace; Cloudflare settings, runtime tokens and allocation records
 // live outside every directory that devenv mounts into workspaces.
 package main
 
@@ -31,33 +31,31 @@ var tunnelDomain = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z
 var tunnelAlias = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
 type tunnelSettings struct {
-	AccountID   string `json:"account_id"`
-	ZoneID      string `json:"zone_id"`
-	Domain      string `json:"domain"`
-	TokenFile   string `json:"api_token_file"`
-	Origin      string `json:"origin"`
-	Cloudflared string `json:"cloudflared"`
+	AccountID string `json:"account_id"`
+	ZoneID    string `json:"zone_id"`
+	Domain    string `json:"domain"`
+	TokenFile string `json:"api_token_file"`
+	Origin    string `json:"origin"`
 }
 
 type tunnelState struct {
-	GitDir     string            `json:"git_dir"`
-	Root       string            `json:"root"`
-	Checkout   string            `json:"checkout"`
-	Enabled    bool              `json:"enabled"`
-	Retired    bool              `json:"retired,omitempty"`
-	Name       string            `json:"allocation_name"`
-	AccountID  string            `json:"account_id"`
-	ZoneID     string            `json:"zone_id"`
-	Domain     string            `json:"domain"`
-	Origin     string            `json:"origin"`
-	ID         string            `json:"instance_id"`
-	DNSRecords map[string]string `json:"dns_records"`
-	Process    *tunnelProcess    `json:"process,omitempty"`
-	Binary     string            `json:"runtime_binary,omitempty"`
+	GitDir        string            `json:"git_dir"`
+	Root          string            `json:"root"`
+	Checkout      string            `json:"checkout"`
+	Enabled       bool              `json:"enabled"`
+	Retired       bool              `json:"retired,omitempty"`
+	Name          string            `json:"allocation_name"`
+	AccountID     string            `json:"account_id"`
+	ZoneID        string            `json:"zone_id"`
+	Domain        string            `json:"domain"`
+	Origin        string            `json:"origin"`
+	ID            string            `json:"instance_id"`
+	DNSRecords    map[string]string `json:"dns_records"`
+	LegacyProcess json.RawMessage   `json:"process,omitempty"`
 }
 
 func (s tunnelState) network() string   { return "devenv-ingress-" + s.ID }
-func (s tunnelState) relay() string     { return "devenv-ingress-relay-" + s.ID }
+func (s tunnelState) container() string { return "devenv-tunnel-" + s.ID }
 func (s tunnelState) appHost() string   { return s.ID + "." + s.Domain }
 func (s tunnelState) filesHost() string { return "files-" + s.ID + "." + s.Domain }
 func (s tunnelState) environment() []string {
@@ -327,7 +325,6 @@ func tunnelCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 		fs.StringVar(&settings.Domain, "domain", settings.Domain, "owned zone domain")
 		fs.StringVar(&settings.TokenFile, "api-token-file", settings.TokenFile, "host-only Cloudflare API token file")
 		fs.StringVar(&settings.Origin, "origin", settings.Origin, "single HTTP Docker-network origin")
-		fs.StringVar(&settings.Cloudflared, "cloudflared", settings.Cloudflared, "native cloudflared executable (default PATH)")
 	} else if action != "status" && action != "retire" {
 		return fmt.Errorf("unknown tunnel action %q", action)
 	}
@@ -393,16 +390,15 @@ func tunnelCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return nil
 	}
 	if action == "status" {
-		fmt.Fprintf(stdout, "Instance: %s\nEnabled: %t\nRetired: %t\nApp: https://%s\nFiles: https://%s\nIngress network: %s\n", state.ID, state.Enabled, state.Retired, state.appHost(), state.filesHost(), state.network())
+		fmt.Fprintf(stdout, "Instance: %s\nEnabled: %t\nRetired: %t\nApp: https://%s\nFiles: https://%s\nOrigin: %s\nIngress network: %s\nTunnel container: %s\n", state.ID, state.Enabled, state.Retired, state.appHost(), state.filesHost(), state.Origin, state.network(), state.container())
 		return nil
 	}
 	if state.Root != cfg.Root {
 		return errors.New("this worktree's tunnel belongs to a different devenv root; reuse its original --root")
 	}
-	if err = stopTunnelRuntime(ctx, *state, path); err != nil {
+	if err = stopTunnelRuntime(ctx, *state); err != nil {
 		return err
 	}
-	state.Process = nil
 	state.Enabled = false
 	if err = writePrivateJSON(path, state); err != nil {
 		return err

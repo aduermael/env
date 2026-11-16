@@ -166,8 +166,8 @@ func (api cloudflareAPI) allocate(ctx context.Context, s *tunnelState, path stri
 		return err
 	}
 }
-func (api cloudflareAPI) route(ctx context.Context, s tunnelState, port string) error {
-	origin := "http://127.0.0.1:" + port
+func (api cloudflareAPI) route(ctx context.Context, s tunnelState) error {
+	origin := s.Origin
 	ingress := []map[string]string{{"hostname": s.appHost(), "service": origin}, {"hostname": s.filesHost(), "service": origin}, {"service": "http_status:404"}}
 	return api.request(ctx, "PUT", "/accounts/"+s.AccountID+"/cfd_tunnel/"+s.ID+"/configurations", map[string]any{"config": map[string]any{"ingress": ingress}}, nil)
 }

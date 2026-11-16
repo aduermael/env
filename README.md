@@ -273,8 +273,8 @@ panes on it. Outside a git worktree it fails. The generated `dev up` calls
 `devenv up --quiet`, so normal preflight checks stay silent unless something
 fails. Lines that name a command to run are printed regardless.
 
-`devenv stop` removes the current worktree's container and stops its native tunnel
-process and relay, retaining its Cloudflare allocation and URLs. The
+`devenv stop` removes the current worktree's container and stops its tunnel
+container, retaining its Cloudflare allocation and URLs. The
 generated `dev down` calls it. With no container running it succeeds.
 
 `devenv down` removes every managed runtime container, including the proxy
@@ -638,11 +638,11 @@ docker build -f dev.Dockerfile -t local-dev:latest .
 
 ## Optional public worktree URLs
 
-Public ingress is **off by default**. The macOS host owns Cloudflare credentials,
-allocation, and a native `cloudflared` process. The workspace receives only public
-metadata. Install [cloudflared 2025.4.0 or newer](https://developers.cloudflare.com/tunnel/downloads/)
-(`brew install cloudflared`) and use a local Docker Desktop Unix-socket context.
-Remote Docker contexts cannot reach this host's loopback relay.
+Public ingress is **off by default**. The host CLI owns Cloudflare allocation and
+automatically runs `cloudflare/cloudflared:2026.11.0` in a separate Docker container
+for each enabled worktree. Docker pulls the image as needed; no host `cloudflared`
+installation is required. Use a local Docker Desktop Unix-socket context so Docker
+can mount the private host runtime-token file into the tunnel container.
 
 Create a Cloudflare API token restricted to the development account with
 Cloudflare Tunnel edit access and the development zone with DNS edit and zone
@@ -662,8 +662,7 @@ devenv tunnel configure \
 The domain must exactly match the Cloudflare zone. The origin is one HTTP Docker
 network alias and explicit port. For a server running directly inside the
 workspace, omit `--origin` to use `http://workspace:8080`. Houston instead attaches
-its sibling proxy as `houston` on the provided ingress network. An optional
-`--cloudflared /absolute/path` selects the native executable.
+its sibling proxy as `houston` on the provided ingress network.
 
 From the desired worktree on the **host**:
 
@@ -691,22 +690,25 @@ The workspace receives exactly these ingress settings:
 | `DEVENV_INGRESS_NETWORK` | `devenv-ingress-UUID` |
 
 The external bridge network has label `io.devenv.instance=UUID`. Each allocation
-has its own network; its relay never joins the shared Docker proxy network.
-Native cloudflared routes the two exact hosts to a credential-free TCP relay
-published on **127.0.0.1 only**, which forwards to the configured origin and
-preserves the HTTP Host header. All other tunnel hosts return 404. The loopback
-port is necessary to bridge native host cloudflared to Docker; it is not a public
-host port. No API token or runtime tunnel token is placed in Docker environment,
-arguments, mounts, or volumes.
+has its own network. Its tunnel container routes the two exact public hosts
+directly to the configured origin, preserving the HTTP Host header. For a service
+inside the workspace, bind to `0.0.0.0:8080` so the sidecar can reach it through
+Docker DNS as `workspace:8080`. All other tunnel hosts return 404. There are no
+published host ports and no intermediate relay.
 
-The shared Docker API assumes trusted workspaces. Keeping credentials on the host
-prevents ordinary workspace file/container inspection from exposing them; it is
-not isolation against a malicious workspace with Docker API access. Use a
-dedicated development account and zone, and do not treat this environment as a
-hostile-code sandbox.
+The account API token stays on the host. Only the per-tunnel runtime token is
+mounted read-only into the tunnel container, which runs with a read-only root
+filesystem and dropped capabilities. Neither credential is passed in container
+environment variables or command arguments, or mounted into the workspace.
+
+The workspace retains full Docker capabilities for builds and Dagger. An agent
+with that access can inspect sibling containers and reach their credentials.
+The sidecar keeps secrets out of workspace files and environment, but does not
+provide isolation against Docker API access. Separating the engines is a future
+improvement; use a dedicated development account and zone.
 
 ```sh
-devenv stop                 # Stop this workspace and native connector; retain URLs.
+devenv stop                 # Stop this workspace and tunnel container; retain URLs.
 devenv up                   # Restart the same enabled allocation.
 devenv stop
 devenv up --tunnel=false    # Run privately; retain the allocation for later reuse.
@@ -723,21 +725,103 @@ does not retarget them. Retire and explicitly allocate again to change an origin
 Existing bindings retain their account, zone, and domain; restore the original
 host settings or retire before changing those properties.
 
-Host settings, runtime tokens, logs, and allocation records live outside workspace
+Host settings, runtime tokens, and allocation records live outside workspace
 mounts under `~/Library/Application Support/devenv-tunnels` on macOS. Set
 `DEVENV_TUNNEL_HOME` consistently to choose another private host directory. Paths
 are checked after resolving symlinks. `devenv down`, including `--delete-data`,
 retains this directory and Cloudflare allocations. Keep it when clearing workspace
-data; use `tunnel retire` for intentional remote cleanup. The native process is
-identified by its executable, private token-file path, and process start identity
-before shutdown; stop runs before removing the relay.
+data; use `tunnel retire` for intentional remote cleanup. Container ownership
+labels are checked before reusing or removing a tunnel container. Docker manages
+its restart policy and logs; `devenv tunnel status` prints its name for
+`docker logs NAME`. Stop an existing native tunnel with the previous CLI version
+before upgrading to this sidecar version.
+
+### First test: JSON over public HTTPS
+
+This test only needs the env branch, Docker Desktop and your development
+Cloudflare account/zone. Houston and houston-hub do not need to be merged or run.
+Use this env checkout, or any Git checkout without an existing tunnel allocation;
+no second worktree is required. If it already has a tunnel with a different
+origin, retire that allocation first or use another existing checkout.
+
+On your Mac, stop any running environment for the test checkout with the currently
+installed `devenv stop`, then install the branch's prebuilt macOS ARM64 CLI:
+
+```sh
+git switch feat/worktree-tunnels
+git pull --ff-only
+git lfs pull
+./bin/devenv setup --source "$PWD"
+source ~/.zshrc
+```
+
+Allow setup to rebuild the workspace image so public metadata reaches new Herdr
+sessions. Put the restricted account API token in
+`~/.config/devenv-secrets/cloudflare-api-token`, outside all workspace mounts,
+then configure and start from your test checkout **on the Mac**:
+
+```sh
+chmod 600 "$HOME/.config/devenv-secrets/cloudflare-api-token"
+devenv tunnel configure \
+  --account-id YOUR_ACCOUNT_ID \
+  --zone-id YOUR_ZONE_ID \
+  --domain YOUR_ZONE_DOMAIN \
+  --api-token-file "$HOME/.config/devenv-secrets/cloudflare-api-token" \
+  --origin http://workspace:8080
+devenv up --tunnel
+devenv tunnel status
+```
+
+Open the new workspace machine in Herdr. **Inside the container**, start a server:
+
+```sh
+cat > /tmp/tunnel-smoke.go <<'EOF'
+package main
+
+import (
+    "fmt"
+    "log"
+    "net/http"
+    "os"
+)
+
+func main() {
+    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.Header().Set("Cache-Control", "no-store")
+        fmt.Fprintln(w, `{"ok":true}`)
+    })
+    log.Printf("Public URL: %s", os.Getenv("DEVENV_PUBLIC_URL"))
+    log.Fatal(http.ListenAndServe("0.0.0.0:8080", nil))
+}
+EOF
+go run /tmp/tunnel-smoke.go
+```
+
+Leave that server running. In another **Mac terminal**, use the `App` URL from
+`devenv tunnel status`:
+
+```sh
+curl -i https://UUID.YOUR_ZONE_DOMAIN/
+```
+
+Expect HTTP 200 and `{"ok":true}`. Initial DNS/certificate activation can take
+time. For a 502, first check `curl -i http://localhost:8080/` inside the workspace
+and confirm that `Origin` in the status output is `http://workspace:8080`. On the
+Mac, `docker logs devenv-tunnel-UUID` shows the connector's connection status.
+
+Run `devenv stop` on the Mac to stop both containers and keep the URL for later.
+`devenv tunnel retire` additionally deletes this allocation's DNS records and
+Cloudflare tunnel. Neither command needs Houston.
 
 Validate the CLI with `go test ./...` and `go vet ./...`. The opt-in
-`DEVENV_TEST_DOCKER=1 go test ./cmd/devenv -run '^TestTunnelDockerRelay$' -v`
-exercises actual app/file Host routing through the Docker relay and its restart.
-It requires Docker and pulls `alpine/socat:1.8.0.3`; it creates and cleans up isolated
-fixture containers/network without Cloudflare credentials. Live native-host
-loopback and public HTTPS acceptance still require a configured macOS host.
+`DEVENV_TEST_DOCKER=1 go test ./cmd/devenv -run '^TestTunnelDockerNetwork$' -v`
+exercises Docker DNS, app/file Host routing, restart and container ownership using
+a static HTTP probe in the real cloudflared image. It creates and cleans up
+isolated fixture containers and a network without Cloudflare credentials. The
+normal tests cover allocation, direct ingress configuration and sidecar lifecycle.
+Live public HTTPS and Docker Desktop token-mount acceptance still require a
+configured macOS host.
 Where a local SSH daemon can run, `DEVENV_TEST_SSH=1 go test ./cmd/devenv -run
 '^TestTunnelMetadataThroughSSHSession$' -v` verifies that public metadata reaches
 an actual SSH session. It uses temporary keys and configuration without modifying
