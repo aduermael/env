@@ -393,3 +393,85 @@ func TestTunnelRetirementTokenCleanupMustCompleteBeforeReuse(t *testing.T) {
 		t.Fatalf("new allocation reused old token: %s %v", got, err)
 	}
 }
+
+type tunnelFixtureTransport func(*http.Request) (*http.Response, error)
+
+func (f tunnelFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestTunnelOriginDefaultDoesNotRetargetExistingAllocation(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "private")
+	bin := filepath.Join(base, "bin")
+	t.Setenv("DEVENV_TUNNEL_HOME", home)
+	t.Setenv("DOCKER_HOST", "unix:///fixture-docker.sock")
+	t.Setenv("DOCKER_CONTEXT", "")
+	if err := os.MkdirAll(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	docker := `#!/bin/sh
+case "$1" in
+ps) exit 0 ;;
+inspect) printf '[]\n' ;;
+*) echo "unexpected fixture Docker command" >&2; exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(docker), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cloudflared := filepath.Join(bin, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\nprintf 'cloudflared version 2025.4.0\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	settings := tunnelSettings{AccountID: strings.Repeat("a", 32), ZoneID: strings.Repeat("b", 32), Domain: "example.dev", TokenFile: filepath.Join(home, "api-token"), Cloudflared: cloudflared, Origin: "http://workspace:8080"}
+	if err := writePrivate(settings.TokenFile, []byte("fixture-api-token")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateJSON(filepath.Join(home, "config.json"), settings); err != nil {
+		t.Fatal(err)
+	}
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = tunnelFixtureTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" || r.URL.Path != "/client/v4/zones/"+settings.ZoneID {
+			t.Errorf("unexpected provisioning request %s %s", r.Method, r.URL)
+		}
+		return nil, fmt.Errorf("fixture stops before remote provisioning")
+	})
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	cfg := config{Root: filepath.Join(base, "env"), Tunnel: true, TunnelSet: true}
+	first := worktree{GitDir: filepath.Join(base, "first", ".git"), RepoRoot: filepath.Join(base, "first"), CheckoutPath: filepath.Join(base, "first")}
+	prepare := func(wt worktree) *tunnelState {
+		t.Helper()
+		_, err := prepareTunnel(context.Background(), cfg, wt)
+		if err == nil || !strings.Contains(err.Error(), "fixture stops before remote provisioning") {
+			t.Fatalf("unexpected prepare result: %v", err)
+		}
+		state, _, err := loadTunnel(wt)
+		if err != nil || state == nil {
+			t.Fatalf("missing prepared binding: %+v %v", state, err)
+		}
+		return state
+	}
+	original := prepare(first)
+	if original.Origin != settings.Origin {
+		t.Fatalf("initial origin=%s", original.Origin)
+	}
+	original.ID = testTunnelID
+	path, _ := tunnelStatePath(first)
+	if err := writePrivateJSON(path, original); err != nil {
+		t.Fatal(err)
+	}
+	settings.Origin = "http://houston:80"
+	if err := writePrivateJSON(filepath.Join(home, "config.json"), settings); err != nil {
+		t.Fatal(err)
+	}
+	existing := prepare(first)
+	if existing.ID != original.ID || existing.Name != original.Name || existing.Origin != original.Origin {
+		t.Fatalf("existing allocation retargeted: %+v", existing)
+	}
+	second := worktree{GitDir: filepath.Join(base, "second", ".git"), RepoRoot: filepath.Join(base, "second"), CheckoutPath: filepath.Join(base, "second")}
+	fresh := prepare(second)
+	if fresh.Origin != settings.Origin || fresh.Name == original.Name {
+		t.Fatalf("new allocation did not use new default: %+v", fresh)
+	}
+}

@@ -717,8 +717,9 @@ After retirement, stop any remaining workspace and explicitly run
 `devenv up --tunnel` to allocate new URLs. Plain `up` remains private. Retirement
 refuses DNS records that were reassigned. Interrupted provisioning and retirement
 can be retried; keep the private state so retries recover the original allocation.
-Changing the configured origin takes effect on the next stopped workspace start,
-preserving its UUID and URLs. Stop the workspace before changing its origin.
+The configured origin is a default for new allocations. Existing allocations keep
+their stored origin across restarts, so changing the default for another project
+does not retarget them. Retire and explicitly allocate again to change an origin.
 Existing bindings retain their account, zone, and domain; restore the original
 host settings or retire before changing those properties.
 
@@ -737,6 +738,10 @@ exercises actual app/file Host routing through the Docker relay and its restart.
 It requires Docker and pulls `alpine/socat:1.8.0.3`; it creates and cleans up isolated
 fixture containers/network without Cloudflare credentials. Live native-host
 loopback and public HTTPS acceptance still require a configured macOS host.
+Where a local SSH daemon can run, `DEVENV_TEST_SSH=1 go test ./cmd/devenv -run
+'^TestTunnelMetadataThroughSSHSession$' -v` verifies that public metadata reaches
+an actual SSH session. It uses temporary keys and configuration without modifying
+host SSH setup; the normal suite always checks the entrypoint environment lists.
 
 The tracked `bin/devenv` executable targets macOS ARM64 (Git LFS); the root
 `devenv` artifact targets Linux ARM64. Rebuild both after CLI source changes:

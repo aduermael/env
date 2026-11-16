@@ -384,16 +384,6 @@ func prepareTunnel(ctx context.Context, cfg config, wt worktree) (*tunnelState, 
 	if state.AccountID != settings.AccountID || state.ZoneID != settings.ZoneID || state.Domain != settings.Domain {
 		return nil, errors.New("host account, zone or domain differs from this binding; restore its host settings or retire it before changing these properties")
 	}
-	if state.Origin != settings.Origin {
-		if running && info.State.Running {
-			return nil, errors.New("stop this workspace before changing its tunnel origin")
-		}
-		if err = stopTunnelRuntime(ctx, *state, path); err != nil {
-			return nil, err
-		}
-		state.Process = nil
-		state.Origin = settings.Origin
-	}
 	state.Enabled = true
 	state.Checkout = wt.CheckoutPath
 	if err = writePrivateJSON(path, state); err != nil {
