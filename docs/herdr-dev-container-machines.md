@@ -349,7 +349,7 @@ CLI, in `cmd/devenv/main.go`:
 - Add worktree resolution, registry load/store, port allocation, and SSH config rendering as pure functions with tests. Port allocation takes the probe as a function value so tests can fake a busy port.
 - Add a `notice()` helper that writes to stderr regardless of `--quiet`, for messages that name a command the user must run.
 - Render `~/.devenv/herdr/ssh_config` and install the `~/.ssh/config` include from `setup` and `up`. Remove the include from `down --all --delete-data`.
-- Add `devenv up` and `devenv stop` (the per-worktree stop). Replace the generated `dev` function so it accepts only `up` and `down`. `dev down` calls `devenv down`. `dev down --all` calls `devenv down --all`. Anything else prints usage. `devenv down` removes the current worktree. `devenv down --all` is the global command.
+- Add `devenv up` and `devenv stop` (the per-worktree stop). Replace the generated `dev` function so it accepts only `up` and `down`. `dev` defaults to `up` and `--quiet`, then forwards any flags, so a later value wins. `dev --tunnel` and `dev up --tunnel` call `devenv up --quiet --tunnel`. `dev down --all` calls `devenv down --quiet --all`. Any other command name prints usage. `devenv down` removes the current worktree. `devenv down --all` is the global command.
 - Remove `devenv run` and `devDockerRunArgs`. `dev up` ensures the detached workspace container. `dev down` removes that worktree's container.
 - Extend `down --all --delete-data` to remove Herdr volumes labeled for this root and the managed block in `~/.ssh/config`.
 - Update the usage text in `printUsage`.

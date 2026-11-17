@@ -1183,15 +1183,19 @@ esac
 	}
 	b.WriteString(`
 dev() {
-  case "$#:$1:$2" in
-    0::|1:up:) command devenv up --quiet ;;
-    1:down:) command devenv down --quiet ;;
-    2:down:--all) command devenv down --all --quiet ;;
-    *)
-      echo "usage: dev [up] | dev down [--all]" >&2
-      return 2
-      ;;
-  esac
+  local cmd=up
+  if [ $# -gt 0 ]; then
+    case "$1" in
+      -*) ;;
+      up|down) cmd=$1; shift ;;
+      *)
+        echo "usage: dev [up] [flags] | dev down [flags]" >&2
+        return 2
+        ;;
+    esac
+  fi
+  # --quiet is the default. Flags after it win, including --quiet=false.
+  command devenv "$cmd" --quiet "$@"
 }
 `)
 	fmt.Fprintf(&b, "%s\n", zshrcEndMarker)

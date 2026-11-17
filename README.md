@@ -16,6 +16,9 @@ After setup, a new zsh session should have these commands:
 ```sh
 dev
 dev up
+dev --tunnel
+dev up --tunnel
+dev up --tunnel=false
 dev down
 dev down --all
 ```
@@ -23,9 +26,11 @@ dev down --all
 `dev up` (or plain `dev`) starts the dev container for the current git
 worktree and registers it as a Herdr machine, in the Herdr app, the herdr TUI,
 or both, depending on which are installed. Work happens in Herdr panes on that
-machine. `dev down` (the same as `devenv down`) removes that worktree's
+machine. Flags after `dev` or `dev up` are passed through, so `dev --tunnel`
+and `dev up --tunnel` enable the public tunnel, and `dev up --tunnel=false`
+suspends it. `dev down` (the same as `devenv down`) removes that worktree's
 container. `dev down --all` (the same as `devenv down --all`) removes every
-managed container.
+managed container. Other `down` flags are passed through the same way.
 
 ## Build the CLI
 
@@ -271,17 +276,19 @@ contains the current directory, waits until it answers SSH, saves it as a
 Herdr machine, and returns. It does not open a shell and does not run a
 command: the container is a Herdr machine, and shells and agents are Herdr
 panes on it. Outside a git worktree it fails. The generated `dev up` calls
-`devenv up --quiet`, so normal preflight checks stay silent unless something
-fails. Lines that name a command to run are printed regardless.
+`devenv up --quiet` and appends any flags you passed, so normal preflight
+checks stay silent unless something fails. `dev --quiet=false` passes
+`--quiet=false` after the default, which turns the status output back on.
+Lines that name a command to run are printed regardless.
 
 `devenv stop` and `devenv down` remove the current worktree's container and
 stop its tunnel container, retaining its Cloudflare allocation and URLs. The
-generated `dev down` calls `devenv down --quiet`. With no container running it
-succeeds. Outside a git worktree it fails.
+generated `dev down` calls `devenv down --quiet` and appends any flags you
+passed. With no container running it succeeds. Outside a git worktree it fails.
 
 `devenv down --all` removes every managed runtime container, including the proxy
 bridge and proxy network. It keeps `~/.devenv` state unless `--delete-data` is
-passed. The generated `dev down --all` calls `devenv down --all --quiet`.
+passed. `dev down --all` is `devenv down --quiet --all`.
 
 `devenv run` no longer exists.
 
@@ -328,20 +335,27 @@ case ":$PATH:" in
 esac
 
 dev() {
-  case "$#:$1:$2" in
-    0::|1:up:) command devenv up --quiet ;;
-    1:down:) command devenv down --quiet ;;
-    2:down:--all) command devenv down --all --quiet ;;
-    *) echo "usage: dev [up] | dev down [--all]" >&2; return 2 ;;
-  esac
+  local cmd=up
+  if [ $# -gt 0 ]; then
+    case "$1" in
+      -*) ;;
+      up|down) cmd=$1; shift ;;
+      *)
+        echo "usage: dev [up] [flags] | dev down [flags]" >&2
+        return 2
+        ;;
+    esac
+  fi
+  command devenv "$cmd" --quiet "$@"
 }
 # <<< devenv <<<
 ```
 
-`dev` with no arguments is `dev up`. `dev down` stops the current worktree,
-like `devenv down`. `dev down --all` stops every managed container, like
-`devenv down --all`. Anything else prints usage and does not start or stop a
-container.
+`dev` with no arguments is `dev up`. Flags are forwarded after `--quiet`, so
+a later value wins: `dev --tunnel` is `devenv up --quiet --tunnel`, and
+`dev --quiet=false` leaves status output on. `dev down` stops the current
+worktree. `dev down --all` stops every managed container. Any command name
+other than `up` or `down` prints usage and does not start or stop a container.
 
 ## Herdr machines
 

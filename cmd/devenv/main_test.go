@@ -600,7 +600,7 @@ func TestWorkspaceRunArgs(t *testing.T) {
 
 func TestZshrcDevFunctionCallsDevenv(t *testing.T) {
 	block := zshrcBlock(config{Root: "/Users/me/.devenv", Image: "local-dev:latest", ProxyImage: "p", ProxyContainer: "c", ProxyPort: "23750"})
-	for _, want := range []string{"devenv up --quiet", "devenv down --quiet", "devenv down --all --quiet", "usage: dev [up] | dev down [--all]"} {
+	for _, want := range []string{`command devenv "$cmd" --quiet "$@"`, "usage: dev [up] [flags] | dev down [flags]"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("zshrc block missing %q:\n%s", want, block)
 		}
@@ -629,7 +629,7 @@ func TestZshrcDevFunctionDispatch(t *testing.T) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	stub := "#!/bin/sh\necho \"devenv $*\"\n"
+	stub := "#!/bin/sh\nprintf '%s\\n' devenv \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "devenv"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -640,14 +640,20 @@ func TestZshrcDevFunctionDispatch(t *testing.T) {
 		want string
 		code int
 	}{
-		{"", "devenv up --quiet", 0},
-		{"up", "devenv up --quiet", 0},
-		{"down", "devenv down --quiet", 0},
-		{"down --all", "devenv down --all --quiet", 0},
-		{"up --all", "", 2},
-		{"down --everything", "", 2},
-		{"down --all extra", "", 2},
+		{"", "devenv\nup\n--quiet", 0},
+		{"up", "devenv\nup\n--quiet", 0},
+		{"--tunnel", "devenv\nup\n--quiet\n--tunnel", 0},
+		{"up --tunnel", "devenv\nup\n--quiet\n--tunnel", 0},
+		{"up --tunnel=false", "devenv\nup\n--quiet\n--tunnel=false", 0},
+		{"--tunnel=false", "devenv\nup\n--quiet\n--tunnel=false", 0},
+		{"--quiet=false", "devenv\nup\n--quiet\n--quiet=false", 0},
+		{"up --image 'local dev'", "devenv\nup\n--quiet\n--image\nlocal dev", 0},
+		{"down", "devenv\ndown\n--quiet", 0},
+		{"down --all", "devenv\ndown\n--quiet\n--all", 0},
+		{"down --all --delete-data", "devenv\ndown\n--quiet\n--all\n--delete-data", 0},
+		{"down --root /tmp/devenv", "devenv\ndown\n--quiet\n--root\n/tmp/devenv", 0},
 		{"run", "", 2},
+		{"setup", "", 2},
 		{"'down --all'", "", 2},
 	}
 	for _, tc := range cases {
@@ -671,6 +677,27 @@ func TestZshrcDevFunctionDispatch(t *testing.T) {
 		if tc.code != 0 && !strings.Contains(stderr.String(), "usage: dev") {
 			t.Fatalf("dev %s: expected usage on stderr, got %q", tc.args, stderr.String())
 		}
+	}
+}
+
+func TestUpFlagsLaterValueWins(t *testing.T) {
+	cfg, err := parseUpFlags([]string{"--quiet", "--tunnel=false", "--quiet=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Quiet {
+		t.Fatal("later --quiet=false should override --quiet")
+	}
+	if !cfg.TunnelSet || cfg.Tunnel {
+		t.Fatalf("Tunnel=%v TunnelSet=%v, want an explicit false", cfg.Tunnel, cfg.TunnelSet)
+	}
+
+	cfg, err = parseUpFlags([]string{"--quiet", "--tunnel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Quiet || !cfg.Tunnel || !cfg.TunnelSet {
+		t.Fatalf("Quiet=%v Tunnel=%v TunnelSet=%v", cfg.Quiet, cfg.Tunnel, cfg.TunnelSet)
 	}
 }
 
