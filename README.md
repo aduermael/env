@@ -664,7 +664,8 @@ network alias and explicit port. For a server running directly inside the
 workspace, omit `--origin` to use `http://workspace:8080`. Houston instead attaches
 its sibling proxy as `houston` on the provided ingress network.
 
-From the desired worktree on the **host**:
+Both the main repository checkout and linked worktrees are supported, regardless
+of the checked-out branch. From the desired Git checkout on the **host**:
 
 ```sh
 devenv up --tunnel

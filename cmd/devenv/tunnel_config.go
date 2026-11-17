@@ -375,7 +375,7 @@ func tunnelCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 		if err = writePrivateJSON(filepath.Join(home, "config.json"), settings); err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, "Host tunnel settings saved. Run devenv up --tunnel from a worktree to opt in.")
+		fmt.Fprintln(stdout, "Host tunnel settings saved. Run devenv up --tunnel from any Git checkout to opt in.")
 		return nil
 	}
 	if worktreeErr != nil {
