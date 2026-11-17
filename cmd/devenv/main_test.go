@@ -600,7 +600,7 @@ func TestWorkspaceRunArgs(t *testing.T) {
 
 func TestZshrcDevFunctionCallsDevenv(t *testing.T) {
 	block := zshrcBlock(config{Root: "/Users/me/.devenv", Image: "local-dev:latest", ProxyImage: "p", ProxyContainer: "c", ProxyPort: "23750"})
-	for _, want := range []string{"devenv up --quiet", "devenv stop --quiet", "devenv down --quiet", "usage: dev [up] | dev down [--all]"} {
+	for _, want := range []string{"devenv up --quiet", "devenv down --quiet", "devenv down --all --quiet", "usage: dev [up] | dev down [--all]"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("zshrc block missing %q:\n%s", want, block)
 		}
@@ -642,8 +642,8 @@ func TestZshrcDevFunctionDispatch(t *testing.T) {
 	}{
 		{"", "devenv up --quiet", 0},
 		{"up", "devenv up --quiet", 0},
-		{"down", "devenv stop --quiet", 0},
-		{"down --all", "devenv down --quiet", 0},
+		{"down", "devenv down --quiet", 0},
+		{"down --all", "devenv down --all --quiet", 0},
 		{"up --all", "", 2},
 		{"down --everything", "", 2},
 		{"down --all extra", "", 2},
@@ -671,6 +671,36 @@ func TestZshrcDevFunctionDispatch(t *testing.T) {
 		if tc.code != 0 && !strings.Contains(stderr.String(), "usage: dev") {
 			t.Fatalf("dev %s: expected usage on stderr, got %q", tc.args, stderr.String())
 		}
+	}
+}
+
+func TestParseDownFlags(t *testing.T) {
+	cfg, err := parseDownFlags(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.All || cfg.DeleteData {
+		t.Fatalf("All=%v DeleteData=%v, want both false", cfg.All, cfg.DeleteData)
+	}
+
+	cfg, err = parseDownFlags([]string{"--all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.All || cfg.DeleteData {
+		t.Fatalf("All=%v DeleteData=%v, want --all without --delete-data", cfg.All, cfg.DeleteData)
+	}
+
+	cfg, err = parseDownFlags([]string{"--all", "--delete-data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.All || !cfg.DeleteData {
+		t.Fatalf("All=%v DeleteData=%v, want both true", cfg.All, cfg.DeleteData)
+	}
+
+	if _, err := parseDownFlags([]string{"--delete-data"}); err == nil || !strings.Contains(err.Error(), "--all") {
+		t.Fatalf("delete-data without --all: %v", err)
 	}
 }
 

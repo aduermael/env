@@ -23,8 +23,9 @@ dev down --all
 `dev up` (or plain `dev`) starts the dev container for the current git
 worktree and registers it as a Herdr machine, in the Herdr app, the herdr TUI,
 or both, depending on which are installed. Work happens in Herdr panes on that
-machine. `dev down` removes that worktree's container. `dev down --all` (the
-same as `devenv down`) removes every managed container.
+machine. `dev down` (the same as `devenv down`) removes that worktree's
+container. `dev down --all` (the same as `devenv down --all`) removes every
+managed container.
 
 ## Build the CLI
 
@@ -245,7 +246,7 @@ devenv setup [flags]
 devenv up [flags]
 devenv stop [flags]
 devenv tunnel configure|status|retire [flags]
-devenv down [flags]
+devenv down [--all] [flags]
 ```
 
 `devenv setup` builds the local dev image, prepares `~/.devenv`, starts the safe
@@ -273,13 +274,14 @@ panes on it. Outside a git worktree it fails. The generated `dev up` calls
 `devenv up --quiet`, so normal preflight checks stay silent unless something
 fails. Lines that name a command to run are printed regardless.
 
-`devenv stop` removes the current worktree's container and stops its tunnel
-container, retaining its Cloudflare allocation and URLs. The
-generated `dev down` calls it. With no container running it succeeds.
+`devenv stop` and `devenv down` remove the current worktree's container and
+stop its tunnel container, retaining its Cloudflare allocation and URLs. The
+generated `dev down` calls `devenv down --quiet`. With no container running it
+succeeds. Outside a git worktree it fails.
 
-`devenv down` removes every managed runtime container, including the proxy
+`devenv down --all` removes every managed runtime container, including the proxy
 bridge and proxy network. It keeps `~/.devenv` state unless `--delete-data` is
-passed. The generated `dev down --all` calls `devenv down --quiet`.
+passed. The generated `dev down --all` calls `devenv down --all --quiet`.
 
 `devenv run` no longer exists.
 
@@ -328,17 +330,18 @@ esac
 dev() {
   case "$#:$1:$2" in
     0::|1:up:) command devenv up --quiet ;;
-    1:down:) command devenv stop --quiet ;;
-    2:down:--all) command devenv down --quiet ;;
+    1:down:) command devenv down --quiet ;;
+    2:down:--all) command devenv down --all --quiet ;;
     *) echo "usage: dev [up] | dev down [--all]" >&2; return 2 ;;
   esac
 }
 # <<< devenv <<<
 ```
 
-`dev` with no arguments is `dev up`. `dev down --all` stops every managed
-container, like `devenv down`. Anything else prints usage and does not start
-or stop a container.
+`dev` with no arguments is `dev up`. `dev down` stops the current worktree,
+like `devenv down`. `dev down --all` stops every managed container, like
+`devenv down --all`. Anything else prints usage and does not start or stop a
+container.
 
 ## Herdr machines
 
@@ -387,7 +390,7 @@ session `default` are fixed per worktree and stored in
   copy stale, so prefer the pin.
 - Rebuilding the image with `devenv setup` does not restart a running
   workspace container. The new image is used after `dev down` and `dev up`.
-- `devenv down --delete-data` removes the keys, the registry, the Herdr
+- `devenv down --all --delete-data` removes the keys, the registry, the Herdr
   volumes, and the managed include in `~/.ssh/config`. Saved Herdr profiles
   then point at nothing; remove them with `herdr machine remove <id>` after
   reading `herdr machine list`.
@@ -497,11 +500,17 @@ not remove `~/.devenv/home`, `~/.devenv/gitconfig`, or SSH keys.
 
 ## `devenv down`
 
-`devenv down` tears down running containers managed by the CLI, including the
-safe Docker socket proxy. It is also idempotent: running it when no managed
-containers exist should succeed.
+`devenv down` removes the current git worktree's container and stops its tunnel
+container. The proxy, other worktrees, the Herdr profile, the SSH alias, the
+registry row, the host key, and the Herdr volume stay. With no container
+running it succeeds. Outside a git worktree it fails. `devenv stop` does the
+same thing.
 
-`devenv down` must not delete identity or durable state:
+`devenv down --all` tears down every running container managed by the CLI for
+this root, including the safe Docker socket proxy and every worktree. It is
+also idempotent: running it when no managed containers exist should succeed.
+
+`devenv down --all` must not delete identity or durable state:
 
 - Do not delete `~/.devenv/gitconfig`.
 - Do not delete `~/.devenv/home` or tool state such as `~/.codex`.
@@ -518,8 +527,9 @@ containers exist should succeed.
 - Do not remove the dev image unless a separate explicit prune command or flag
   is added.
 
-`devenv down --delete-data` is the only command that removes `~/.devenv`, the
-Herdr volumes, and the include block.
+`devenv down --all --delete-data` is the only command that removes `~/.devenv`,
+the Herdr volumes, and the include block. `--delete-data` without `--all` is
+an error.
 
 The next `devenv setup` or launcher command should be able to recreate runtime
 containers without forcing the user to re-authenticate tools.
@@ -729,9 +739,10 @@ host settings or retire before changing those properties.
 Host settings, runtime tokens, and allocation records live outside workspace
 mounts under `~/Library/Application Support/devenv-tunnels` on macOS. Set
 `DEVENV_TUNNEL_HOME` consistently to choose another private host directory. Paths
-are checked after resolving symlinks. `devenv down`, including `--delete-data`,
-retains this directory and Cloudflare allocations. Keep it when clearing workspace
-data; use `tunnel retire` for intentional remote cleanup. Container ownership
+are checked after resolving symlinks. `devenv down` and `devenv down --all`,
+including `--delete-data`, retain this directory and Cloudflare allocations.
+Keep it when clearing workspace data; use `tunnel retire` for intentional
+remote cleanup. Container ownership
 labels are checked before reusing or removing a tunnel container. Docker manages
 its restart policy and logs; `devenv tunnel status` prints its name for
 `docker logs NAME`. Stop an existing native tunnel with the previous CLI version

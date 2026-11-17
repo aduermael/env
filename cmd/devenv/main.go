@@ -52,9 +52,12 @@ type config struct {
 	NoZshrc       bool
 	Quiet         bool
 	DeleteData    bool
-	Tunnel        bool
-	TunnelSet     bool
-	PublicTunnel  *tunnelState
+	// All removes every managed container for this root. Without it, down
+	// removes only the current worktree's container.
+	All          bool
+	Tunnel       bool
+	TunnelSet    bool
+	PublicTunnel *tunnelState
 }
 
 type bridgeConfig struct {
@@ -292,12 +295,16 @@ func parseDownFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.ProxyContainer, "proxy-container", cfg.ProxyContainer, "safe Docker socket proxy container name")
 	fs.StringVar(&cfg.ProxyPort, "proxy-port", cfg.ProxyPort, "localhost port for the safe Docker socket proxy")
 	fs.BoolVar(&cfg.DeleteData, "delete-data", false, "delete the devenv state directory after removing containers")
+	fs.BoolVar(&cfg.All, "all", false, "remove every managed container for this devenv root")
 	fs.BoolVar(&cfg.Quiet, "quiet", false, "reduce status output")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
 	if fs.NArg() != 0 {
 		return config{}, fmt.Errorf("down does not accept positional arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if cfg.DeleteData && !cfg.All {
+		return config{}, errors.New("down --delete-data requires --all")
 	}
 	return normalizeConfig(cfg)
 }
@@ -426,6 +433,9 @@ func setup(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 }
 
 func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
+	if !cfg.All {
+		return stop(ctx, cfg, stdout, stderr)
+	}
 	if err := validateConfiguredTunnelPaths(cfg, nil); err != nil {
 		return err
 	}
@@ -1175,8 +1185,8 @@ esac
 dev() {
   case "$#:$1:$2" in
     0::|1:up:) command devenv up --quiet ;;
-    1:down:) command devenv stop --quiet ;;
-    2:down:--all) command devenv down --quiet ;;
+    1:down:) command devenv down --quiet ;;
+    2:down:--all) command devenv down --all --quiet ;;
     *)
       echo "usage: dev [up] | dev down [--all]" >&2
       return 2
@@ -1355,7 +1365,7 @@ Commands:
   setup    Prepare ~/.devenv, build the dev image, start the socket proxy, and install zsh functions.
   up       Start the dev container for the current git worktree and register it as a Herdr machine.
   stop     Remove the dev container for the current git worktree. The Herdr machine and registry row stay.
-  down     Remove every container created by devenv. State in ~/.devenv is kept unless --delete-data is set.
+  down     Remove the dev container for the current git worktree. --all removes every managed container. State in ~/.devenv is kept unless --all --delete-data is set.
 
 Setup flags:
   --image string             Local dev image tag (default %q or DEVENV_IMAGE).
@@ -1381,8 +1391,9 @@ Stop flags:
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
 
 Down flags:
+  --all                      Remove every managed container for this root, including the proxy.
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
-  --delete-data              Delete the state directory after removing containers.
+  --delete-data              With --all, delete the state directory after removing containers.
 `, exe, defaultDevImage, defaultProxyImage, defaultProxyContainer, defaultProxyPort, defaultDevImage, defaultProxyContainer, defaultProxyPort)
 
 	if runtime.GOOS == "windows" {

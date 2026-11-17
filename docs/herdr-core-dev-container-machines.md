@@ -82,7 +82,7 @@ When that entry has state `unreachable` and `why` starts with "a different core 
 
 `hc machine update <name>` copies the Mac's `hc` to the remote and restarts the remote core. It is the emergency path when the app has updated its core past what the image pins and a rebuild is not possible right now. It leaves a second binary under `~/.devenv/home/.local/bin`, which the next image bump makes stale. The README says to prefer the pin.
 
-`devenv down` does not touch the machine list. The machine goes unreachable and comes back on the next `dev up`. `devenv down --delete-data` removes the Herdr volume, so the core identity is gone with it. The notice that already tells people to run `herdr machine remove` also names `hc machine rm <id>`.
+`devenv down` does not touch the machine list. The machine goes unreachable and comes back on the next `dev up`. `devenv down --all --delete-data` removes the Herdr volume, so the core identity is gone with it. The notice that already tells people to run `herdr machine remove` also names `hc machine rm <id>`.
 
 ## Version check
 

@@ -100,7 +100,7 @@ Hold an exclusive flock on `~/.devenv/herdr/worktrees.lock` for the create-or-at
 
 The port is allocated from `43100` through `43999` and then stored in the record. Skip ports already present in the file, and skip `cfg.ProxyPort` even when `DEVENV_PROXY_PORT` is moved into that range. The default proxy port is `23750`. Also probe each candidate: bind `127.0.0.1:<port>` on the Mac and release it, then dial `127.0.0.1:<port>` with a short timeout. Skip the port when the bind fails or the dial connects. The dial matters because Go listeners set `SO_REUSEADDR`, and on macOS a loopback bind can succeed while another process listens on `0.0.0.0:<port>`. The registry only knows about devenv's own ports, and an unrelated listener on the Mac would otherwise make the new container's publish fail. The probe happens under the lock, so two worktrees cannot pick the same port. Never change a worktree's port after it is stored. A recorded port is an error only when a different listener holds it. This worktree's own running container is that listener, so `dev up` does the "already running" check before the port check. The error names the port and the registry file, so a person can free the port or delete the row. Reusing the port for a different worktree would make an old Herdr profile connect to the wrong container.
 
-`devenv down` leaves this file in place. `devenv down --delete-data` removes `~/.devenv`, including the registry, keys, and host keys, and removes the managed include block from `~/.ssh/config`. OpenSSH ignores an `Include` whose file is missing, but the block would point at a deleted file, and the next `dev up` writes it again anyway.
+`devenv down` leaves this file in place. `devenv down --all --delete-data` removes `~/.devenv`, including the registry, keys, and host keys, and removes the managed include block from `~/.ssh/config`. OpenSSH ignores an `Include` whose file is missing, but the block would point at a deleted file, and the next `dev up` writes it again anyway.
 
 ## SSH
 
@@ -173,7 +173,7 @@ Inside the container, `sshd` listens on port 22 on all container interfaces. Doc
 
 ### SSH config on the Mac
 
-`devenv up` writes `~/.devenv/herdr/ssh_config` from the registry on every run, after the registry update and before the ready check, and installs the managed include at the top of `~/.ssh/config`. `devenv setup` installs the include too, so it exists before the first `dev up`, and renders `ssh_config` from whatever the registry holds, which may be no host blocks. No other command touches either file except `down --delete-data`. The include uses the same replace-in-place approach as the zshrc block:
+`devenv up` writes `~/.devenv/herdr/ssh_config` from the registry on every run, after the registry update and before the ready check, and installs the managed include at the top of `~/.ssh/config`. `devenv setup` installs the include too, so it exists before the first `dev up`, and renders `ssh_config` from whatever the registry holds, which may be no host blocks. No other command touches either file except `down --all --delete-data`. The include uses the same replace-in-place approach as the zshrc block:
 
 ```text
 # >>> devenv herdr >>>
@@ -200,7 +200,7 @@ Host devenv-env-root-a1b2c3
 
 `User` follows the container user when it is not `dev`. `IdentitiesOnly yes` limits this alias to the Herdr key. `UserKnownHostsFile` keeps these host keys out of the user's normal `known_hosts`. `accept-new` records the key on the first successful connection. The next container presents the same key, so the check succeeds.
 
-`devenv down` leaves the include and the host blocks in place. The alias has to keep resolving while the container is stopped, because that is the saved Herdr target. `devenv down --delete-data` removes the managed block from `~/.ssh/config` along with `~/.devenv`, and leaves every other line alone.
+`devenv down` leaves the include and the host blocks in place. The alias has to keep resolving while the container is stopped, because that is the saved Herdr target. `devenv down --all --delete-data` removes the managed block from `~/.ssh/config` along with `~/.devenv`, and leaves every other line alone.
 
 ## Container lifecycle
 
@@ -210,11 +210,11 @@ The user-facing commands are `dev up` and `dev down`. `dev` with no arguments, o
 
 `dev up` starts the workspace container and returns. `sshd` is its main process. Closing the Herdr client leaves the server and its panes running. There is no shell attach.
 
-`dev down` is `devenv stop`. It removes that worktree's container and nothing else. With no container running, it succeeds. The proxy, other worktrees, the Herdr profile, the SSH alias, the registry row, the host key, and the Herdr volume stay. `devenv down` stays the global teardown: every managed container for this root, including the proxy.
+`dev down` is `devenv down`. It removes that worktree's container and nothing else. With no container running, it succeeds. The proxy, other worktrees, the Herdr profile, the SSH alias, the registry row, the host key, and the Herdr volume stay. `devenv stop` does the same per-worktree removal. `devenv down --all` is the global teardown: every managed container for this root, including the proxy.
 
 The generated zsh function accepts only `up` and `down`. Today `dev()` forwards every argument after `--`, so `dev up` would otherwise run a program named `up` inside the container. The function keeps passing `--quiet`, which routes progress lines through `status()` and discards them. Lines the user has to act on do not go through `status()`: the "install herdr" hint, the exact `machine add` line, the ready-check timeout with its `docker logs` hint, and the busy-port error all print to stderr unconditionally. Add a `notice()` helper next to `status()` for that, and use it for every message that names a command to run.
 
-`devenv up` runs the current `runContainer` prelude before it takes the worktree lock: `ensureLayout`, `ensureGitconfig`, `ensureSSH`, Herdr key setup, and `ensureProxy`. `devenv down` removes the proxy container and `devenv-dockerproxy-net`. The next `dev up` has to create them again, or `docker run --network` fails.
+`devenv up` runs the current `runContainer` prelude before it takes the worktree lock: `ensureLayout`, `ensureGitconfig`, `ensureSSH`, Herdr key setup, and `ensureProxy`. `devenv down --all` removes the proxy container and `devenv-dockerproxy-net`. The next `dev up` has to create them again, or `docker run --network` fails.
 
 For a worktree, under the registry lock:
 
@@ -233,7 +233,7 @@ The workspace container is started detached (`docker run -d`) with `--restart un
 
 `devenv setup` rebuilding the image does not replace a running workspace container. The new image is used the next time `dev up` creates the container.
 
-`devenv down` still removes every container with `com.aduermael.env.devenv.managed=true` and this root, including the proxy and any workspace container. The Herdr profile, SSH alias, registry row, host key, and Herdr volume remain. The next `dev up` creates a new container on the same alias.
+`devenv down --all` removes every container with `com.aduermael.env.devenv.managed=true` and this root, including the proxy and any workspace container. The Herdr profile, SSH alias, registry row, host key, and Herdr volume remain. The next `dev up` creates a new container on the same alias.
 
 ### Create arguments
 
@@ -271,7 +271,7 @@ Publish `127.0.0.1`, not `0.0.0.0`. On OrbStack, published ports are reachable f
 
 `-d` with no `-t` on create. There is no `--rm`: the container stays after `dev up` returns, and `dev down` removes it. The container does not need the caller's `TERM`. Herdr allocates its own ptys.
 
-Create the Herdr volume with labels `com.aduermael.env.devenv.managed=true`, `com.aduermael.env.devenv.role=herdr`, `com.aduermael.env.devenv.root=<cfg.Root>`, and `com.aduermael.env.devenv.machine-id=<id>`. `devenv down` without `--delete-data` leaves the volume. `devenv down --delete-data` removes volumes with those managed and root labels, along with the existing Codex SQLite volume.
+Create the Herdr volume with labels `com.aduermael.env.devenv.managed=true`, `com.aduermael.env.devenv.role=herdr`, `com.aduermael.env.devenv.root=<cfg.Root>`, and `com.aduermael.env.devenv.machine-id=<id>`. `devenv down` and `devenv down --all` without `--delete-data` leave the volume. `devenv down --all --delete-data` removes volumes with those managed and root labels, along with the existing Codex SQLite volume.
 
 The `~/.config/herdr` symlink makes Herdr store its config and sockets at `/var/lib/devenv/herdr/herdr/` on that volume. The volume is per machine id, so two worktrees do not share sockets. The shared `~/.devenv/home` bind mount stays the place for tool state such as `~/.codex`. Herdr sockets stay off that mount: it is shared by every container, and it is a macOS virtiofs mount.
 
@@ -302,7 +302,7 @@ When `herdr` is not on the Mac `PATH`, `dev up` still succeeds. Print the instal
 
 `dev up` is the only command that runs `machine add`. Run it on a terminal when Herdr may prompt. A non-interactive `dev up` that would need a prompt prints the `machine add` line and leaves the container up.
 
-`devenv down` does not run `herdr machine remove`. The profile stays and goes offline. `--delete-data` removes the keys and the registry, which orphans existing profiles. Tell the user to remove them with `herdr machine remove <profile-id>` after reading `herdr machine list`.
+`devenv down` and `devenv down --all` do not run `herdr machine remove`. The profile stays and goes offline. `--all --delete-data` removes the keys and the registry, which orphans existing profiles. Tell the user to remove them with `herdr machine remove <profile-id>` after reading `herdr machine list`.
 
 Do not set `ForwardAgent`. Git from panes uses the key mounted at `/home/dev/.ssh`.
 
@@ -318,7 +318,7 @@ Do this on a Mac, against Docker Desktop and OrbStack, before changing `cmd/deve
 
 - `ssh -o BatchMode=yes` to `127.0.0.1:<port>` as the container user, with the shared key, succeeds. `ssh <alias> herdr --version` prints only the version line. `ssh <alias> printenv HOME DOCKER_HOST GIT_CONFIG_GLOBAL CODEX_SQLITE_HOME` prints the container home, the proxy URL, `/devenv/gitconfig`, and `/var/lib/codex-sqlite`.
 - In a linked worktree at `<repo>/worktrees/<name>`, `git status` succeeds in the container. The first Herdr pane's cwd is `/workspace/worktrees/<name>`.
-- `devenv down` then `dev up` recreates the proxy network and the workspace container.
+- `devenv down --all` then `dev up` recreates the proxy network and the workspace container.
 - `herdr machine add <alias> --label <id> --remote-session default` saves a profile and the machine appears in a local `herdr`.
 - Herdr connects through the system `ssh` and honors `~/.ssh/config`. Comment out the managed include, restart the local `herdr`, and the machine must become unreachable. Put the include back and it must reconnect. If Herdr uses its own SSH implementation instead, the alias, `IdentityFile`, and `UserKnownHostsFile` in this plan do not apply, and the plan has to be revised before implementation.
 - Kill `herdr server` inside a running container with the Mac client connected. Record whether the client starts it again, and whether a disconnect and reconnect does. This decides whether the entrypoint needs the restart loop.
@@ -348,15 +348,15 @@ CLI, in `cmd/devenv/main.go`:
 - Generate Herdr keys from `setup` and `up`, next to `ensureSSH`.
 - Add worktree resolution, registry load/store, port allocation, and SSH config rendering as pure functions with tests. Port allocation takes the probe as a function value so tests can fake a busy port.
 - Add a `notice()` helper that writes to stderr regardless of `--quiet`, for messages that name a command the user must run.
-- Render `~/.devenv/herdr/ssh_config` and install the `~/.ssh/config` include from `setup` and `up`. Remove the include from `down --delete-data`.
-- Add `devenv up` and `devenv stop` (the per-worktree stop). Replace the generated `dev` function so it accepts only `up` and `down`. `dev down` calls `devenv stop`. Anything else prints usage. `devenv down` remains the global command.
+- Render `~/.devenv/herdr/ssh_config` and install the `~/.ssh/config` include from `setup` and `up`. Remove the include from `down --all --delete-data`.
+- Add `devenv up` and `devenv stop` (the per-worktree stop). Replace the generated `dev` function so it accepts only `up` and `down`. `dev down` calls `devenv down`. `dev down --all` calls `devenv down --all`. Anything else prints usage. `devenv down` removes the current worktree. `devenv down --all` is the global command.
 - Remove `devenv run` and `devDockerRunArgs`. `dev up` ensures the detached workspace container. `dev down` removes that worktree's container.
-- Extend `down --delete-data` to remove Herdr volumes labeled for this root and the managed block in `~/.ssh/config`.
+- Extend `down --all --delete-data` to remove Herdr volumes labeled for this root and the managed block in `~/.ssh/config`.
 - Update the usage text in `printUsage`.
 
 Docs, in `README.md`:
 
-- `dev up` starts the worktree container and returns. `dev down` removes that container. `devenv down` is unchanged and still removes every managed container.
+- `dev up` starts the worktree container and returns. `dev down` and `devenv down` remove that container. `devenv down --all` removes every managed container.
 - `dev` no longer opens a shell or runs a command. `devenv run` is removed. Work happens in Herdr panes. `gh auth login` runs there after `dev up`.
 - The container is a Herdr machine while it is up. The same worktree keeps the same machine the next time `dev up` starts it.
 - State layout gains `herdr/` (host key, public key, `worktrees.json`, `ssh_config`, `known_hosts`). The client private key is `~/.ssh/devenv_herdr_ed25519`.
@@ -391,7 +391,6 @@ Codex stores its logs and thread index in SQLite. On a macOS bind mount that fil
 ## Out of scope
 
 - The Herdr desktop app and `herdr-core`.
-- Changing `devenv down` into a per-worktree command. Per-worktree stop is `dev down`.
 - Replacing a running container because the image was rebuilt.
 - A per-worktree Codex SQLite volume.
 - An interactive `dev` shell, and `dev <command>` / `devenv run`.
