@@ -71,15 +71,13 @@ func main(){endpoint:=flag.String("url","","");host:=flag.String("host","","");f
 	if out, err := check.CombinedOutput(); err == nil || !strings.Contains(string(out), "Provided Tunnel token is not valid") {
 		t.Fatalf("cloudflared token-file read: %s %v", out, err)
 	}
-	state := tunnelState{ID: "test-" + suffix, Root: "/test", GitDir: "/test/.git", Origin: "http://workspace:8080"}
+	state := tunnelState{ID: "test-" + suffix, Root: dir, GitDir: filepath.Join(dir, "repo", ".git"), Origin: "http://workspace:8080"}
 	if err = ensureTunnelNetwork(ctx, state); err != nil {
 		t.Fatal(err)
 	}
 	defer dockerOutput(context.Background(), "network", "rm", state.network())
 	target := "devenv-origin-test-" + suffix
-	run("create", "--name", target, "--network", state.network(), "--network-alias", "workspace", "--entrypoint", "/probe", fixtureImage)
 	defer dockerOutput(context.Background(), "rm", "-f", target)
-	run("start", target)
 	defer dockerOutput(context.Background(), "rm", "-f", state.container())
 	// Inject a static HTTP probe in place of cloudflared. The production sidecar
 	// flags are retained except the host token mount (not available to remote CI).
@@ -98,6 +96,25 @@ func main(){endpoint:=flag.String("url","","");host:=flag.String("host","","");f
 	}
 	run(fixture...)
 	run("start", state.container())
+	cfg := config{Root: state.Root}
+	wt := worktree{GitDir: state.GitDir}
+	// Startup creates the tunnel first. Its matching root/Git-directory labels
+	// must not make the workspace lookup adopt it as an existing workspace.
+	if id, _, exists, err := findWorktreeContainer(ctx, cfg, wt); err != nil || exists {
+		t.Fatalf("tunnel-only workspace lookup: id=%q exists=%t err=%v", id, exists, err)
+	}
+	workspaceArgs := []string{"create", "--name", target, "--network", state.network(), "--network-alias", "workspace",
+		"--label", labelManaged + "=true", "--label", labelRole + "=workspace",
+		"--label", labelRoot + "=" + state.Root, "--label", labelWorktreeGitDir + "=" + state.GitDir,
+		"--entrypoint", "/probe"}
+	for _, value := range state.environment() {
+		workspaceArgs = append(workspaceArgs, "-e", value)
+	}
+	workspaceID := run(append(workspaceArgs, fixtureImage)...)
+	run("start", target)
+	if id, info, exists, err := findWorktreeContainer(ctx, cfg, wt); err != nil || !exists || id == "" || !strings.HasPrefix(workspaceID, id) || !workspaceTunnelMatches(info, &state) {
+		t.Fatalf("workspace with tunnel lookup: id=%q exists=%t err=%v", id, exists, err)
+	}
 	for restart := 0; restart < 2; restart++ {
 		for _, route := range []string{"app", "files"} {
 			got := run("exec", state.container(), "/probe", "-url", state.Origin, "-host", route+".example.dev")

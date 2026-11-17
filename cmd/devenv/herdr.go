@@ -758,11 +758,12 @@ func ensureHerdrVolume(ctx context.Context, cfg config, id string) error {
 	return nil
 }
 
-// findWorktreeContainer returns the container labeled for this worktree and
+// findWorktreeContainer returns the workspace container labeled for this worktree and
 // root, if any.
 func findWorktreeContainer(ctx context.Context, cfg config, wt worktree) (string, containerInspect, bool, error) {
 	out, err := dockerOutput(ctx, "ps", "-aq",
 		"--filter", "label="+labelManaged+"=true",
+		"--filter", "label="+labelRole+"=workspace",
 		"--filter", "label="+labelRoot+"="+cfg.Root,
 		"--filter", "label="+labelWorktreeGitDir+"="+wt.GitDir,
 	)
