@@ -1194,8 +1194,7 @@ dev() {
         ;;
     esac
   fi
-  # --quiet is the default. Flags after it win, including --quiet=false.
-  command devenv "$cmd" --quiet "$@"
+  command devenv "$cmd" "$@"
 }
 `)
 	fmt.Fprintf(&b, "%s\n", zshrcEndMarker)

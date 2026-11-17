@@ -600,10 +600,13 @@ func TestWorkspaceRunArgs(t *testing.T) {
 
 func TestZshrcDevFunctionCallsDevenv(t *testing.T) {
 	block := zshrcBlock(config{Root: "/Users/me/.devenv", Image: "local-dev:latest", ProxyImage: "p", ProxyContainer: "c", ProxyPort: "23750"})
-	for _, want := range []string{`command devenv "$cmd" --quiet "$@"`, "usage: dev [up] [flags] | dev down [flags]"} {
+	for _, want := range []string{`command devenv "$cmd" "$@"`, "usage: dev [up] [flags] | dev down [flags]"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("zshrc block missing %q:\n%s", want, block)
 		}
+	}
+	if strings.Contains(block, "--quiet") {
+		t.Fatalf("zshrc block adds --quiet by default:\n%s", block)
 	}
 	if strings.Contains(block, "devenv run") {
 		t.Fatalf("zshrc block still calls devenv run:\n%s", block)
@@ -640,18 +643,20 @@ func TestZshrcDevFunctionDispatch(t *testing.T) {
 		want string
 		code int
 	}{
-		{"", "devenv\nup\n--quiet", 0},
-		{"up", "devenv\nup\n--quiet", 0},
-		{"--tunnel", "devenv\nup\n--quiet\n--tunnel", 0},
-		{"up --tunnel", "devenv\nup\n--quiet\n--tunnel", 0},
-		{"up --tunnel=false", "devenv\nup\n--quiet\n--tunnel=false", 0},
-		{"--tunnel=false", "devenv\nup\n--quiet\n--tunnel=false", 0},
-		{"--quiet=false", "devenv\nup\n--quiet\n--quiet=false", 0},
-		{"up --image 'local dev'", "devenv\nup\n--quiet\n--image\nlocal dev", 0},
-		{"down", "devenv\ndown\n--quiet", 0},
-		{"down --all", "devenv\ndown\n--quiet\n--all", 0},
-		{"down --all --delete-data", "devenv\ndown\n--quiet\n--all\n--delete-data", 0},
-		{"down --root /tmp/devenv", "devenv\ndown\n--quiet\n--root\n/tmp/devenv", 0},
+		{"", "devenv\nup", 0},
+		{"up", "devenv\nup", 0},
+		{"--tunnel", "devenv\nup\n--tunnel", 0},
+		{"up --tunnel", "devenv\nup\n--tunnel", 0},
+		{"up --tunnel=false", "devenv\nup\n--tunnel=false", 0},
+		{"--tunnel=false", "devenv\nup\n--tunnel=false", 0},
+		{"--quiet", "devenv\nup\n--quiet", 0},
+		{"up --quiet", "devenv\nup\n--quiet", 0},
+		{"down --quiet", "devenv\ndown\n--quiet", 0},
+		{"up --image 'local dev'", "devenv\nup\n--image\nlocal dev", 0},
+		{"down", "devenv\ndown", 0},
+		{"down --all", "devenv\ndown\n--all", 0},
+		{"down --all --delete-data", "devenv\ndown\n--all\n--delete-data", 0},
+		{"down --root /tmp/devenv", "devenv\ndown\n--root\n/tmp/devenv", 0},
 		{"run", "", 2},
 		{"setup", "", 2},
 		{"'down --all'", "", 2},

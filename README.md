@@ -276,19 +276,18 @@ contains the current directory, waits until it answers SSH, saves it as a
 Herdr machine, and returns. It does not open a shell and does not run a
 command: the container is a Herdr machine, and shells and agents are Herdr
 panes on it. Outside a git worktree it fails. The generated `dev up` calls
-`devenv up --quiet` and appends any flags you passed, so normal preflight
-checks stay silent unless something fails. `dev --quiet=false` passes
-`--quiet=false` after the default, which turns the status output back on.
-Lines that name a command to run are printed regardless.
+`devenv up` and appends any flags you passed. Status lines print while the
+container starts in the background. Pass `--quiet` when those lines should
+stay hidden. Lines that name a command to run are printed regardless.
 
 `devenv stop` and `devenv down` remove the current worktree's container and
 stop its tunnel container, retaining its Cloudflare allocation and URLs. The
-generated `dev down` calls `devenv down --quiet` and appends any flags you
-passed. With no container running it succeeds. Outside a git worktree it fails.
+generated `dev down` calls `devenv down` and appends any flags you passed.
+With no container running it succeeds. Outside a git worktree it fails.
 
 `devenv down --all` removes every managed runtime container, including the proxy
 bridge and proxy network. It keeps `~/.devenv` state unless `--delete-data` is
-passed. `dev down --all` is `devenv down --quiet --all`.
+passed. `dev down --all` is `devenv down --all`.
 
 `devenv run` no longer exists.
 
@@ -346,16 +345,16 @@ dev() {
         ;;
     esac
   fi
-  command devenv "$cmd" --quiet "$@"
+  command devenv "$cmd" "$@"
 }
 # <<< devenv <<<
 ```
 
-`dev` with no arguments is `dev up`. Flags are forwarded after `--quiet`, so
-a later value wins: `dev --tunnel` is `devenv up --quiet --tunnel`, and
-`dev --quiet=false` leaves status output on. `dev down` stops the current
-worktree. `dev down --all` stops every managed container. Any command name
-other than `up` or `down` prints usage and does not start or stop a container.
+`dev` with no arguments is `dev up`. Flags are forwarded as given: `dev --tunnel`
+is `devenv up --tunnel`, and `dev --quiet` is `devenv up --quiet`. `dev down`
+stops the current worktree. `dev down --all` stops every managed container.
+Any command name other than `up` or `down` prints usage and does not start or
+stop a container.
 
 ## Herdr machines
 
