@@ -911,9 +911,13 @@ install -m 0600 -o "${uid}" -g "${gid}" "${devenv_dir}/herdr/id_ed25519.pub" /ru
 
 # OpenSSH 9.2 keeps only the first SetEnv directive, so every variable goes
 # on that one line. This is what an SSH-started herdr server inherits.
+workspace_env_names=(
+    DOCKER_HOST GIT_CONFIG_GLOBAL
+    DEVENV_INSTANCE_ID DEVENV_PUBLIC_URL DEVENV_FILES_URL DEVENV_INGRESS_NETWORK
+)
 session_env="HOME=${home_dir} USER=${user_name} LOGNAME=${user_name} SHELL=/bin/bash"
 session_env+=" CODEX_HOME=${home_dir}/.codex CODEX_SQLITE_HOME=${sqlite_home}"
-for name in DOCKER_HOST GIT_CONFIG_GLOBAL; do
+for name in "${workspace_env_names[@]}"; do
     if [[ -n "${!name:-}" ]]; then
         session_env+=" ${name}=${!name}"
     fi
@@ -1003,7 +1007,7 @@ herdr_env=(
     "CODEX_SQLITE_HOME=${sqlite_home}"
     "PATH=${image_path}"
 )
-for name in DOCKER_HOST GIT_CONFIG_GLOBAL; do
+for name in "${workspace_env_names[@]}"; do
     if [[ -n "${!name:-}" ]]; then
         herdr_env+=("${name}=${!name}")
     fi

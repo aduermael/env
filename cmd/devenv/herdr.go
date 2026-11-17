@@ -397,7 +397,9 @@ func (reg *registry) sortedRecords() []worktreeRecord {
 // a port on first use. It reports whether the registry changed.
 func (reg *registry) ensureRecord(wt worktree, reserved map[int]bool, portFree func(int) bool) (*worktreeRecord, bool, error) {
 	if rec, ok := reg.Worktrees[wt.GitDir]; ok {
-		return rec, false, nil
+		changed := rec.WorktreePath != wt.CheckoutPath || rec.GitCommonDir != wt.CommonDir
+		rec.WorktreePath, rec.GitCommonDir = wt.CheckoutPath, wt.CommonDir
+		return rec, changed, nil
 	}
 	id, err := mintMachineID(wt, reg.hasID, randomSuffix)
 	if err != nil {
@@ -720,6 +722,12 @@ func workspaceRunArgs(cfg config, wt worktree, rec worktreeRecord, uid, gid int)
 	if wt.RepoRoot != containerWorkspace {
 		args = append(args, "-v", wt.RepoRoot+":"+wt.RepoRoot)
 	}
+	if cfg.PublicTunnel != nil {
+		args = append(args, "--network", "name="+cfg.PublicTunnel.network()+",alias=workspace")
+		for _, value := range cfg.PublicTunnel.environment() {
+			args = append(args, "-e", value)
+		}
+	}
 	args = append(args,
 		"--mount", "type=bind,source="+cfg.Root+",target=/devenv,readonly",
 		"--mount", "type=bind,source="+filepath.Join(cfg.Root, "home")+",target=/home/"+cfg.ContainerUser,
@@ -750,11 +758,12 @@ func ensureHerdrVolume(ctx context.Context, cfg config, id string) error {
 	return nil
 }
 
-// findWorktreeContainer returns the container labeled for this worktree and
+// findWorktreeContainer returns the workspace container labeled for this worktree and
 // root, if any.
 func findWorktreeContainer(ctx context.Context, cfg config, wt worktree) (string, containerInspect, bool, error) {
 	out, err := dockerOutput(ctx, "ps", "-aq",
 		"--filter", "label="+labelManaged+"=true",
+		"--filter", "label="+labelRole+"=workspace",
 		"--filter", "label="+labelRoot+"="+cfg.Root,
 		"--filter", "label="+labelWorktreeGitDir+"="+wt.GitDir,
 	)
@@ -787,6 +796,22 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	if err := ensureMacOS(); err != nil {
 		return err
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	wt, err := resolveWorktree(cwd)
+	if err != nil {
+		return err
+	}
+	if err = validateConfiguredTunnelPaths(cfg, &wt); err != nil {
+		return err
+	}
+	unlockTunnels, err := lockTunnels()
+	if err != nil {
+		return err
+	}
+	defer unlockTunnels()
 	status(cfg, stdout, "check: Docker CLI and daemon")
 	if err := dockerCheck(ctx); err != nil {
 		return err
@@ -812,17 +837,14 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("find current directory: %w", err)
-	}
-	wt, err := resolveWorktree(cwd)
+	cfg.PublicTunnel, err = prepareTunnel(ctx, cfg, wt)
 	if err != nil {
 		return err
 	}
 
 	rec, created, err := ensureWorkspaceContainer(ctx, cfg, wt, stdout, stderr)
 	if err != nil {
+		_ = stopWorktreeTunnel(ctx, cfg, wt)
 		return err
 	}
 
@@ -833,6 +855,7 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 			notice(stderr, "container %s did not answer ssh within %s: %v", name, readyCheckTimeout, err)
 			notice(stderr, "inspect it with: docker logs %s", name)
 			_ = dockerRun(ctx, io.Discard, io.Discard, "rm", "-f", name)
+			_ = stopWorktreeTunnel(ctx, cfg, wt)
 			return fmt.Errorf("workspace container %s is not reachable; it was removed", name)
 		}
 	}
@@ -844,7 +867,10 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	herdrBin, _ := exec.LookPath("herdr")
 	hcBin, _ := lookupHC(exec.LookPath, home)
 	registerHerdrMachines(ctx, cfg, rec.ID, herdrBin, hcBin, stdout, stderr)
-	status(cfg, stdout, "done: %s is up for %s", containerName(rec.ID), wt.CheckoutPath)
+	status(cfg, stdout, "✅ Environment ready: %s (%s)", containerName(rec.ID), wt.CheckoutPath)
+	if cfg.PublicTunnel != nil {
+		fmt.Fprintf(stdout, "Public app: https://%s\nFiles: https://%s\n", cfg.PublicTunnel.appHost(), cfg.PublicTunnel.filesHost())
+	}
 	return nil
 }
 
@@ -885,6 +911,9 @@ func ensureWorkspaceContainer(ctx context.Context, cfg config, wt worktree, stdo
 		return worktreeRecord{}, false, err
 	}
 	if exists && info.State.Running {
+		if !workspaceTunnelMatches(info, cfg.PublicTunnel) {
+			return worktreeRecord{}, false, errors.New("running workspace has different tunnel metadata; stop it before restarting")
+		}
 		status(cfg, stdout, "ok: %s is running", name)
 		return rec, false, nil
 	}
@@ -942,6 +971,17 @@ func stop(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	}
 	wt, err := resolveWorktree(cwd)
 	if err != nil {
+		return err
+	}
+	if err = validateConfiguredTunnelPaths(cfg, &wt); err != nil {
+		return err
+	}
+	unlockTunnels, err := lockTunnels()
+	if err != nil {
+		return err
+	}
+	defer unlockTunnels()
+	if err = stopWorktreeTunnel(ctx, cfg, wt); err != nil {
 		return err
 	}
 
