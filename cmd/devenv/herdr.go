@@ -867,7 +867,7 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	herdrBin, _ := exec.LookPath("herdr")
 	hcBin, _ := lookupHC(exec.LookPath, home)
 	registerHerdrMachines(ctx, cfg, rec.ID, herdrBin, hcBin, stdout, stderr)
-	status(cfg, stdout, "done: %s is up for %s", containerName(rec.ID), wt.CheckoutPath)
+	status(cfg, stdout, "✅ Environment ready: %s (%s)", containerName(rec.ID), wt.CheckoutPath)
 	if cfg.PublicTunnel != nil {
 		fmt.Fprintf(stdout, "Public app: https://%s\nFiles: https://%s\n", cfg.PublicTunnel.appHost(), cfg.PublicTunnel.filesHost())
 	}
