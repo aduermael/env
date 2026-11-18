@@ -24,7 +24,7 @@ set -eu
 cd "$DEVENV_DOCKER_FIXTURE"
 case "$1" in
 network) cat network ;;
-inspect) if test -f current; then cat current; else printf '[]\n'; fi ;;
+container) if test -f current; then cat current; else printf '[]\n'; fi ;;
 run) printf 'run\n' >> events; if test -f fail; then cp failed current; else cp ready current; fi ;;
 rm) printf 'rm\n' >> events; rm -f current ;;
 *) echo 'unexpected Docker command' >&2; exit 1 ;;

@@ -67,7 +67,7 @@ type bridgeConfig struct {
 }
 
 type containerInspect struct {
-	Mounts []struct{ Type, Source, Destination string } `json:"Mounts"`
+	Mounts []struct{ Type, Name, Source, Destination string } `json:"Mounts"`
 	Config struct {
 		Image  string            `json:"Image"`
 		Labels map[string]string `json:"Labels"`
@@ -406,14 +406,10 @@ func setup(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		status(cfg, stdout, "skip: dev image build")
 	}
 
-	hostSocket, err := hostDockerSocket(cfg)
-	if err != nil {
+	if err := requireEngineImage(ctx, cfg); err != nil {
 		return err
 	}
-	cfg.HostSocket = hostSocket
-	status(cfg, stdout, "ok: host Docker socket %s", hostSocket)
-
-	if err := ensureProxy(ctx, cfg, hostSocket, stdout, stderr); err != nil {
+	if err := ensureDockerCaches(ctx, cfg, stdout); err != nil {
 		return err
 	}
 
@@ -452,6 +448,15 @@ func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	if err := os.MkdirAll(filepath.Join(cfg.Root, "run"), 0o700); err != nil {
+		return err
+	}
+	unlockCaches, err := lockFile(filepath.Join(cfg.Root, "run", "docker-caches.lock"))
+	if err != nil {
+		return err
+	}
+	defer unlockCaches()
+
 	out, err := dockerOutput(ctx, "ps", "-aq", "--filter", "label="+labelManaged+"=true", "--filter", "label="+labelRoot+"="+cfg.Root)
 	if err != nil {
 		return fmt.Errorf("list managed containers: %w", err)
@@ -460,10 +465,11 @@ func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	if len(ids) == 0 {
 		status(cfg, stdout, "ok: no managed containers to remove")
 	} else {
-		args := append([]string{"rm", "-f"}, ids...)
-		status(cfg, stdout, "remove: %d managed container(s)", len(ids))
-		if err := dockerRun(ctx, stdoutFor(cfg, stdout), stderrFor(cfg, stderr), args...); err != nil {
-			return fmt.Errorf("remove managed containers: %w", err)
+		status(cfg, stdout, "stop and remove: %d managed container(s)", len(ids))
+		for _, id := range ids {
+			if err := stopAndRemoveContainer(ctx, id); err != nil {
+				return fmt.Errorf("remove managed container: %w", err)
+			}
 		}
 	}
 
@@ -476,6 +482,10 @@ func down(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 
 	socketPath := filepath.Join(cfg.Root, "run", "docker.sock")
 	if err := removeSocketIfPresent(socketPath); err != nil {
+		return err
+	}
+
+	if err := removeDockerCacheResources(ctx, cfg, cfg.DeleteData); err != nil {
 		return err
 	}
 
@@ -1212,7 +1222,7 @@ func dockerCheck(ctx context.Context) error {
 }
 
 func inspectContainer(ctx context.Context, name string) (containerInspect, bool, error) {
-	out, err := dockerOutput(ctx, "inspect", name)
+	out, err := dockerOutput(ctx, "container", "inspect", name)
 	if err != nil {
 		if isDockerNotFound(err) {
 			return containerInspect{}, false, nil
@@ -1365,20 +1375,20 @@ func printUsage(w io.Writer) {
   %[1]s tunnel configure|status|retire [flags]
 
 Commands:
-  setup    Prepare ~/.devenv, build the dev image, start the socket proxy, and install zsh functions.
+  setup    Prepare ~/.devenv, build the dev image, start shared Docker caches, and install zsh functions.
   up       Start the dev container for the current git worktree and register it as a Herdr machine.
   stop     Remove the dev container for the current git worktree. The Herdr machine and registry row stay.
   down     Remove the dev container for the current git worktree. --all removes every managed container. State in ~/.devenv is kept unless --all --delete-data is set.
 
 Setup flags:
   --image string             Local dev image tag (default %q or DEVENV_IMAGE).
-  --proxy-image string       Socket proxy image reference (default %q).
+  --proxy-image string       Legacy proxy image reference (default %q; unused by nested Docker).
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
   --source path              Directory containing dev.Dockerfile (default current repo or DEVENV_SOURCE).
   --zshrc path               zshrc file to update (default $HOME/.zshrc or DEVENV_ZSHRC).
-  --host-socket path         Host Docker socket to proxy (or DEVENV_HOST_DOCKER_SOCKET).
-  --proxy-container name     Proxy container name (default %q).
-  --proxy-port port          Localhost port for the proxy container (default %q).
+  --host-socket path         Legacy proxy socket option (unused by nested Docker).
+  --proxy-container name     Legacy resource prefix (default %q).
+  --proxy-port port          Legacy reserved proxy port (default %q).
   --skip-build               Skip building the dev image.
   --no-zshrc                 Skip zshrc installation.
 
@@ -1386,17 +1396,17 @@ Up flags:
   --tunnel                  Enable a stable public tunnel for this worktree; --tunnel=false suspends it.
   --image string             Local dev image tag (default %q or DEVENV_IMAGE).
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
-  --host-socket path         Host Docker socket to proxy (or DEVENV_HOST_DOCKER_SOCKET).
-  --proxy-container name     Proxy container name (default %q).
-  --proxy-port port          Localhost port for the proxy container (default %q).
+  --host-socket path         Legacy proxy socket option (unused by nested Docker).
+  --proxy-container name     Legacy resource prefix (default %q).
+  --proxy-port port          Legacy reserved proxy port (default %q).
 
 Stop flags:
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
 
 Down flags:
-  --all                      Remove every managed container for this root, including the proxy.
+  --all                      Remove every managed container for this root, including registries and any legacy proxy.
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
-  --delete-data              With --all, delete the state directory after removing containers.
+  --delete-data              With --all, delete state and Docker volumes, including inner application data.
 `, exe, defaultDevImage, defaultProxyImage, defaultProxyContainer, defaultProxyPort, defaultDevImage, defaultProxyContainer, defaultProxyPort)
 
 	if runtime.GOOS == "windows" {

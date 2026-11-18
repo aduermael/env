@@ -35,7 +35,7 @@ const (
 	containerWorkspace   = "/workspace"
 	herdrVolumeTarget    = "/var/lib/devenv/herdr"
 	herdrRemoteSession   = "default"
-	readyCheckTimeout    = 30 * time.Second
+	readyCheckTimeout    = 120 * time.Second
 	defaultContainerUser = "dev"
 )
 
@@ -709,15 +709,20 @@ func workspaceRunArgs(cfg config, wt worktree, rec worktreeRecord, uid, gid int)
 		"--label", labelRoot + "=" + cfg.Root,
 		"--label", labelWorktreeGitDir + "=" + wt.GitDir,
 		"--label", labelMachineID + "=" + rec.ID,
-		"--network", proxyNetworkName(cfg),
+		"--privileged",
+		"--stop-timeout", "45",
+		"--label", engineLabel + "=" + engineVersion,
+		"--network", cacheNetwork(cfg),
 		"-p", net.JoinHostPort("127.0.0.1", strconv.Itoa(rec.Port)) + ":" + containerSSHPort,
 		"-e", "DEVENV_PANE_CWD=" + wt.PaneDir(),
 		"-e", "LOCAL_USER_ID=" + strconv.Itoa(uid),
 		"-e", "LOCAL_GROUP_ID=" + strconv.Itoa(gid),
 		"-e", "LOCAL_USER_NAME=" + cfg.ContainerUser,
-		"-e", "DOCKER_HOST=tcp://" + cfg.ProxyContainer + ":2375",
 		"-e", "GIT_CONFIG_GLOBAL=/devenv/gitconfig",
 		"-v", wt.RepoRoot + ":" + containerWorkspace,
+	}
+	for _, value := range engineEnvironment(wt, rec) {
+		args = append(args, "-e", value)
 	}
 	if wt.RepoRoot != containerWorkspace {
 		args = append(args, "-v", wt.RepoRoot+":"+wt.RepoRoot)
@@ -729,7 +734,9 @@ func workspaceRunArgs(cfg config, wt worktree, rec worktreeRecord, uid, gid int)
 		}
 	}
 	args = append(args,
-		"--mount", "type=bind,source="+cfg.Root+",target=/devenv,readonly",
+		"--mount", "type=bind,source="+filepath.Join(cfg.Root, "gitconfig")+",target=/devenv/gitconfig,readonly",
+		"--mount", "type=bind,source="+filepath.Join(cfg.Root, "herdr")+",target=/devenv/herdr,readonly",
+		"--mount", "type=volume,source="+engineVolume(cfg, rec.ID)+",target="+engineDataPath,
 		"--mount", "type=bind,source="+filepath.Join(cfg.Root, "home")+",target=/home/"+cfg.ContainerUser,
 		"--mount", "type=bind,source="+filepath.Join(cfg.Root, "ssh")+",target=/home/"+cfg.ContainerUser+"/.ssh",
 		"--mount", "type=volume,source="+herdrVolumeName(rec.ID)+",target="+herdrVolumeTarget,
@@ -828,12 +835,10 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	if err := ensureHerdrKeys(cfg, stdout, stderr, sshKeygen); err != nil {
 		return err
 	}
-	hostSocket, err := hostDockerSocket(cfg)
-	if err != nil {
+	if err := requireEngineImage(ctx, cfg); err != nil {
 		return err
 	}
-	cfg.HostSocket = hostSocket
-	if err := ensureProxy(ctx, cfg, hostSocket, stdout, stderr); err != nil {
+	if err := ensureDockerCaches(ctx, cfg, stdout); err != nil {
 		return err
 	}
 
@@ -854,7 +859,7 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 			name := containerName(rec.ID)
 			notice(stderr, "container %s did not answer ssh within %s: %v", name, readyCheckTimeout, err)
 			notice(stderr, "inspect it with: docker logs %s", name)
-			_ = dockerRun(ctx, io.Discard, io.Discard, "rm", "-f", name)
+			_ = stopAndRemoveContainer(ctx, name)
 			_ = stopWorktreeTunnel(ctx, cfg, wt)
 			return fmt.Errorf("workspace container %s is not reachable; it was removed", name)
 		}
@@ -911,6 +916,9 @@ func ensureWorkspaceContainer(ctx context.Context, cfg config, wt worktree, stdo
 		return worktreeRecord{}, false, err
 	}
 	if exists && info.State.Running {
+		if info.Config.Labels[engineLabel] != engineVersion {
+			return worktreeRecord{}, false, errors.New("running workspace uses the host Docker proxy; run devenv down, then devenv up to enable its own engine (existing host containers and images are not migrated)")
+		}
 		if !workspaceTunnelMatches(info, cfg.PublicTunnel) {
 			return worktreeRecord{}, false, errors.New("running workspace has different tunnel metadata; stop it before restarting")
 		}
@@ -941,6 +949,10 @@ func ensureWorkspaceContainer(ctx context.Context, cfg config, wt worktree, stdo
 	}
 
 	if err := ensureHerdrVolume(ctx, cfg, rec.ID); err != nil {
+		return worktreeRecord{}, false, err
+	}
+
+	if err := ensureEngineVolume(ctx, cfg, rec.ID); err != nil {
 		return worktreeRecord{}, false, err
 	}
 
@@ -1003,7 +1015,7 @@ func stop(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		return nil
 	}
 	status(cfg, stdout, "remove: container for %s", wt.CheckoutPath)
-	if err := dockerRun(ctx, io.Discard, stderrFor(cfg, stderr), "rm", "-f", id); err != nil {
+	if err := stopAndRemoveContainer(ctx, id); err != nil {
 		return fmt.Errorf("remove worktree container: %w", err)
 	}
 	status(cfg, stdout, "done: %s is down", wt.CheckoutPath)

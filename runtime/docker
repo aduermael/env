@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Keep the normal Docker UX while exporting/importing BuildKit cache through
+# the shared writable registry. Other Docker commands go straight to the CLI.
+set -euo pipefail
+real=/usr/bin/docker
+if [[ "${DEVENV_SHARED_BUILD_CACHE:-1}" != 1 || -z "${DEVENV_BUILD_CACHE_REGISTRY:-}" || -z "${DEVENV_BUILD_CACHE_REPO:-}" ]]; then
+    exec "$real" "$@"
+fi
+
+original=("$@")
+case "${1:-} ${2:-}" in
+    'buildx build') shift 2 ;;
+    build\ *) shift ;;
+    *) exec "$real" "${original[@]}" ;;
+esac
+
+# An explicit builder/cache policy remains the caller's policy. Non-build
+# subrequests (help, outline, check, etc.) must not contact the registry.
+for arg in "$@"; do
+    case "$arg" in
+        --builder|--builder=*|--cache-from|--cache-from=*|--cache-to|--cache-to=*|--help|-h|--call|--call=*|--check)
+            exec "$real" "${original[@]}" ;;
+    esac
+done
+if [[ "${DOCKER_HOST:-}" != unix:///var/run/docker.sock || -n "${DOCKER_CONTEXT:-}" || "${BUILDX_BUILDER:-default}" != default || "${DOCKER_BUILDKIT:-1}" == 0 ]]; then
+    exec "$real" "${original[@]}"
+fi
+
+registry=$DEVENV_BUILD_CACHE_REGISTRY
+repository=$DEVENV_BUILD_CACHE_REPO
+# Separate writers by workspace and invocation (context, Dockerfile, target,
+# platform, etc.), but import all writers for this repository. This allows
+# parallel worktrees to share layers without overwriting each other's manifests.
+key=$(printf '%s\0' "${DEVENV_DOCKER_ID:-workspace}" "$PWD" "$@" | sha256sum)
+tag="cache-${key:0:32}"
+cache_args=(--cache-to "type=registry,ref=$registry/$repository:$tag,mode=max,registry.insecure=true,ignore-error=true")
+tags=$(curl -fsS --connect-timeout 2 --max-time 5 "http://$registry/v2/$repository/tags/list" 2>/dev/null | jq -r '.tags[]? | select(test("^cache-[a-f0-9]{32}$"))' || true)
+for existing in $tags; do
+    cache_args+=(--cache-from "type=registry,ref=$registry/$repository:$existing,registry.insecure=true")
+done
+exec "$real" buildx build "${cache_args[@]}" "$@"

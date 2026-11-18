@@ -839,21 +839,10 @@ fi
 usermod -aG sudo,linuxbrew,devtools "${user_name}"
 chown "${uid}:${gid}" /go /go/bin /go/pkg 2>/dev/null || true
 
-docker_socket="${DOCKER_SOCKET:-/var/run/docker.sock}"
-if [[ -S "${docker_socket}" ]]; then
-    docker_gid="$(stat -c '%g' "${docker_socket}" 2>/dev/null || true)"
-    if [[ -n "${docker_gid}" ]]; then
-        docker_group="$(getent group "${docker_gid}" | cut -d: -f1 || true)"
-        if [[ -z "${docker_group}" ]]; then
-            docker_group="docker-host"
-            if getent group "${docker_group}" >/dev/null; then
-                docker_group="docker-host-${docker_gid}"
-            fi
-            groupadd -K GID_MIN=0 --gid "${docker_gid}" "${docker_group}"
-        fi
-        usermod -aG "${docker_group}" "${user_name}"
-    fi
-fi
+# The socket belongs to this workspace's engine, which starts after user setup.
+getent group docker >/dev/null || groupadd --system docker
+usermod -aG docker "${user_name}"
+install -d -m 0700 -o "${uid}" -g "${gid}" /run/devenv/buildx
 
 sqlite_home="${CODEX_SQLITE_HOME:-/var/lib/codex-sqlite}"
 install -d -m 0700 -o "${uid}" -g "${gid}" "${sqlite_home}"
@@ -912,7 +901,8 @@ install -m 0600 -o "${uid}" -g "${gid}" "${devenv_dir}/herdr/id_ed25519.pub" /ru
 # OpenSSH 9.2 keeps only the first SetEnv directive, so every variable goes
 # on that one line. This is what an SSH-started herdr server inherits.
 workspace_env_names=(
-    DOCKER_HOST GIT_CONFIG_GLOBAL
+    DOCKER_HOST GIT_CONFIG_GLOBAL BUILDX_CONFIG BUILDX_BUILDER
+    DEVENV_DOCKER_ID DEVENV_DOCKER_MIRROR DEVENV_BUILD_CACHE_REGISTRY DEVENV_BUILD_CACHE_REPO
     DEVENV_INSTANCE_ID DEVENV_PUBLIC_URL DEVENV_FILES_URL DEVENV_INGRESS_NETWORK
 )
 session_env="HOME=${home_dir} USER=${user_name} LOGNAME=${user_name} SHELL=/bin/bash"
@@ -1057,7 +1047,7 @@ cd "${pane_cwd}" 2>/dev/null || cd /
 supervise_herdr_server &
 supervise_hc_core &
 
-exec /usr/sbin/sshd -D -e
+exec /usr/local/lib/devenv/devenv-engine /usr/sbin/sshd -D -e
 SCRIPT
 chmod 0755 /usr/local/bin/dev-entrypoint
 EOF
@@ -1137,6 +1127,24 @@ ENV PATH="/usr/local/lib/agent-defaults/bin:${PATH}"
 ENV PGDATA=/workspace/.postgres-data \
     CODEX_SQLITE_HOME=/var/lib/codex-sqlite \
     TERM=xterm-256color
+
+# Keep Engine installation late so adding nested Docker doesn't rebuild all
+# language/toolchain layers. CLI and Engine use the same pinned release.
+ARG CONTAINERD_VERSION=2.3.3-1~debian.12~bookworm
+ARG DOCKER_BUILDX_VERSION=0.36.1-1~debian.12~bookworm
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        "docker-ce=${DOCKER_CLI_VERSION}" \
+        "containerd.io=${CONTAINERD_VERSION}" \
+        "docker-buildx-plugin=${DOCKER_BUILDX_VERSION}" iptables; \
+    rm -rf /var/lib/apt/lists/*; \
+    dockerd --version; \
+    docker buildx version
+
+COPY --chmod=0755 runtime/devenv-engine /usr/local/lib/devenv/devenv-engine
+COPY --chmod=0755 runtime/docker /usr/local/bin/docker
+LABEL com.aduermael.env.devenv.engine="dind-v1"
 
 WORKDIR /workspace
 ENTRYPOINT ["tini", "--", "/usr/local/bin/dev-entrypoint"]

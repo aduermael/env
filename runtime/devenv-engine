@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# PID 1's child: keep sshd and the private Docker daemon alive together, and
+# give dockerd time to stop its containers and flush its persistent state.
+set -Eeuo pipefail
+
+data=/var/lib/devenv/docker
+install -d -m 0711 "$data"
+install -d -m 0755 /run/devenv
+# flock is inherited by dockerd. Even an accidentally double-mounted volume
+# cannot be opened by two live engines.
+exec 9>"$data/engine.lock"
+flock -n 9 || { echo 'devenv: this Docker volume is already in use' >&2; exit 1; }
+
+config=/run/devenv/daemon.json
+jq -n --arg data "$data" \
+    --arg mirror "${DEVENV_DOCKER_MIRROR:-}" \
+    --arg cache "${DEVENV_BUILD_CACHE_REGISTRY:-}" '
+    {"hosts":["unix:///var/run/docker.sock"], "data-root":$data,
+     "pidfile":"/run/devenv/docker.pid",
+     "features":{"containerd-snapshotter":true}, "shutdown-timeout":30,
+     "log-driver":"local"}
+    + (if $mirror == "" then {} else {"registry-mirrors":[$mirror]} end)
+    + (if $cache == "" then {} else {"insecure-registries":[$cache]} end)
+    ' > "$config"
+
+# A Docker Desktop/OrbStack restart or SIGKILL can leave these files in the
+# container's writable layer. The exclusive data lock was acquired first.
+rm -f /run/devenv/docker.pid /var/run/docker.sock
+
+daemon_pid= app_pid=
+cleanup() {
+    trap - EXIT TERM INT
+    if [[ -n "$app_pid" ]]; then kill -TERM "$app_pid" 2>/dev/null || true; fi
+    if [[ -n "$daemon_pid" ]]; then
+        kill -TERM "$daemon_pid" 2>/dev/null || true
+        wait "$daemon_pid" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+
+# Let dockerd launch and supervise its own containerd, whose durable root is
+# beneath data-root. Do not connect to the host's or a system containerd socket.
+dockerd --config-file "$config" &
+daemon_pid=$!
+ready=false
+for ((attempt=0; attempt<90; attempt++)); do
+    if /usr/bin/docker --host unix:///var/run/docker.sock info >/dev/null 2>&1; then
+        ready=true
+        break
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+        echo 'devenv: Docker engine exited during startup' >&2
+        exit 1
+    fi
+    sleep 1
+done
+if [[ "$ready" != true ]]; then
+    echo 'devenv: Docker engine did not become ready within 90 seconds' >&2
+    exit 1
+fi
+
+"$@" &
+app_pid=$!
+# Exiting either essential process exits the container. Its restart policy
+# recovers the whole workspace instead of leaving a working shell with no engine.
+set +e
+wait -n "$daemon_pid" "$app_pid"
+result=$?
+set -e
+exit "$result"

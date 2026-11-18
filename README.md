@@ -3,7 +3,7 @@
 Development environment bootstrap files and the command contract for the
 prebuilt `devenv` CLI.
 
-The intended macOS user experience is that a machine with Docker Desktop, but
+The intended macOS user experience is that a machine with OrbStack (or Docker Desktop), but
 without Go, can use the prebuilt `devenv` binary from this checkout and run one
 setup command:
 
@@ -254,8 +254,8 @@ devenv tunnel configure|status|retire [flags]
 devenv down [--all] [flags]
 ```
 
-`devenv setup` builds the local dev image, prepares `~/.devenv`, starts the safe
-Docker proxy, verifies it, and installs shell commands in zshrc. After updating
+`devenv setup` builds the local dev image, prepares `~/.devenv`, starts the shared Docker
+image mirror and build-cache registry, verifies them, and installs shell commands in zshrc. After updating
 zshrc it prints:
 
 ```text
@@ -285,7 +285,7 @@ stop its tunnel container, retaining its Cloudflare allocation and URLs. The
 generated `dev down` calls `devenv down` and appends any flags you passed.
 With no container running it succeeds. Outside a git worktree it fails.
 
-`devenv down --all` removes every managed runtime container, including the proxy
+`devenv down --all` removes every managed runtime container, including shared registries, cache networks, and any legacy proxy
 bridge and proxy network. It keeps `~/.devenv` state unless `--delete-data` is
 passed. `dev down --all` is `devenv down --all`.
 
@@ -307,8 +307,8 @@ The command must:
 - Initialize env-owned Git config and SSH identity files only when they are
   missing.
 - Install or update the generated zshrc block that defines `dev`.
-- Start or repair the safe Docker socket proxy, then verify the proxy container
-  is running and the proxied socket is usable.
+- Start or repair the shared image mirror and writable build-cache registry,
+  then wait for both registry health checks.
 
 `setup` must not overwrite existing identity or persisted tool state. Existing
 `~/.devenv/gitconfig`, SSH keys, and `~/.devenv/home` contents are user state.
@@ -432,13 +432,11 @@ volume. The default layout is:
     ssh_config
     known_hosts
   run/
-    docker.sock
-    proxy-bridge.pid
+    docker-caches.lock
 ```
 
 The Herdr client private key is `~/.ssh/devenv_herdr_ed25519`, outside
-`~/.devenv`, because `~/.devenv` is mounted into every container. Only its
-public half is copied to `~/.devenv/herdr/id_ed25519.pub`. `~/.ssh/config`
+`~/.devenv`. Only its public half is copied to `~/.devenv/herdr/id_ed25519.pub`. `~/.ssh/config`
 gets a managed include block at the top that points at
 `~/.devenv/herdr/ssh_config`, where each worktree's `devenv-<id>` alias is
 rendered.
@@ -450,16 +448,19 @@ Mount contract:
   stored on a Linux Docker volume at `/var/lib/codex-sqlite` instead of that
   bind mount. A multi-gigabyte `logs_2.sqlite` on macOS virtiofs can stall TUI
   startup on "loading" the model for a long time.
-- `~/.devenv` is mounted read-only at `/devenv`, and containers receive
-  `GIT_CONFIG_GLOBAL=/devenv/gitconfig` so env-owned Git config is used without
-  overlaying files inside the persisted home bind mount.
+- `~/.devenv/gitconfig` and `~/.devenv/herdr` are mounted read-only under
+  `/devenv`. Containers receive `GIT_CONFIG_GLOBAL=/devenv/gitconfig`. The
+  entire state root is no longer mounted, so legacy proxy sockets under `run`
+  are not exposed to new workspaces.
 - `~/.devenv/ssh` contains the env-specific SSH keypair and is mounted as
   `/home/dev/.ssh`.
-- `~/.devenv/run/docker.sock` is the safe proxied Docker socket used for host
-  health checks and host-side Docker CLI access.
-- Dev containers join the managed proxy Docker network and receive
-  `DOCKER_HOST=tcp://devenv-dockerproxy:2375`, avoiding direct host Docker
-  socket mounts.
+- Dev containers run their own Docker Engine and receive
+  `DOCKER_HOST=unix:///var/run/docker.sock`. This is an inner socket; no host
+  engine socket is mounted.
+- Each worktree has an exclusive Docker data volume at `/var/lib/devenv/docker`,
+  including the daemon-managed containerd store. It persists across sessions.
+- Workspaces share a root-scoped network with the image mirror and writable
+  build-cache registry. Registry data lives on separate persistent volumes.
 - The repository root of the current git worktree is mounted at `/workspace`.
 - `~/.devenv/home/.config/herdr`, `~/.devenv/home/.local/state/herdr`, and
   `~/.devenv/home/.local/state/herdr-core` are symlinks onto the per-worktree
@@ -495,32 +496,124 @@ covers every worktree.
 Follow the instructions printed by `gh`. If your env SSH key is already uploaded
 on GitHub, skip the SSH key upload step.
 
-## Safe Docker Socket
+## Docker inside devenv
 
-Dev containers should not bind mount the host Docker socket directly. The CLI
-runs a Docker socket proxy container that binds the real host socket read-only
-and exposes a filtered Docker API on a managed Docker network. A small
-`devenv` bridge process exposes the same filtered API as a host Unix socket at
-`~/.devenv/run/docker.sock` so setup can verify it and host-side tools can use
-it with `DOCKER_HOST=unix://$HOME/.devenv/run/docker.sock`.
+Each workspace runs its own Docker Engine. From the Mac, start the workspace:
 
-`devenv setup` should create or reuse the proxy container and bridge, recreate
-them when configuration is stale or unhealthy, and wait until the proxied socket
-and proxy network are usable before reporting success.
+```sh
+devenv up --tunnel
+```
 
-The safe socket proxy is runtime infrastructure. Repairing or recreating it must
-not remove `~/.devenv/home`, `~/.devenv/gitconfig`, or SSH keys.
+From a shell inside it, publish your application normally:
+
+```sh
+docker run -d -p 8080:80 nginx
+```
+
+The existing tunnel reaches `workspace:8080`, which forwards to nginx's port 80.
+It does not publish application port 8080 on the Mac. Multiple worktrees can use
+8080 at the same time. Bind to all interfaces (`-p 8080:80`), not only
+`127.0.0.1`, so the tunnel sidecar can connect. A different application port can
+be mapped to the same 8080 ingress, for example `-p 8080:3000`. Bind mounts now
+resolve inside the workspace, including `/workspace` and files in `/tmp`.
+
+The inner engine starts before SSH becomes ready. If it exits, the workspace
+restarts. Normal shutdown gives it time to stop containers and flush its store.
+Images, local build cache, inner containers, and named volumes survive workspace
+recreation. Inner container restart policies still apply on the next session.
+The engine holds an exclusive lock on its data volume; two daemons must never
+share a writable Docker store.
+
+This implementation uses privileged Docker-in-Docker on OrbStack. It separates
+Docker engines and port namespaces; it is not a stronger security boundary
+against hostile workspace code. The old proxy's host-bind filter is not applied
+to inner Docker requests. Approved outer bind mounts remain accessible inside.
+
+### Shared downloads and build layers
+
+`setup` and `up` manage two shared registry containers per devenv root, without
+publishing their ports on the Mac:
+
+- `devenv-mirror:5000` is a pull-through cache for Docker Hub image downloads.
+  Each inner daemon is configured to use it automatically. GHCR, ECR, and other
+  registries continue to work directly but aren't cached by this Hub mirror.
+- `devenv-cache:5000` is a writable registry for built layers. A pull-through
+  registry cannot accept pushes, so these are separate services and stores.
+
+Inside devenv, both commands automatically import and export shared build cache:
+
+```sh
+docker build -t my-app .
+docker buildx build -t my-app .
+```
+
+The wrapper uses the inner engine's BuildKit with `mode=max`, including
+intermediate stages, and loads the resulting image into that engine as usual.
+Cache manifests are scoped to the Git repository and individual build writers;
+all worktrees of that repository import each other's manifests. Blob storage is
+content-addressed across the registry. Image downloads are shared across all
+workspaces. A new inner engine still needs its own unpacked image layers.
+
+Explicit `--builder`, `--cache-from`, or `--cache-to` options, a different Docker
+context/endpoint, or `DEVENV_SHARED_BUILD_CACHE=0` bypass automatic cache flags.
+`/usr/bin/docker` is the original CLI. Docker credentials remain in the shared
+home, while Buildx runtime configuration is private to each workspace. If the
+build registry is unavailable, builds can continue with local cache; cache export
+failures are reported by BuildKit. The registries are trusted local development
+infrastructure, accessible to all workspaces under the same devenv root.
+
+Compose builds do not pass through `docker build`. To share their build cache,
+set the standard Compose options explicitly (use a distinct suffix per service):
+
+```yaml
+services:
+  app:
+    build:
+      context: .
+      cache_from:
+        - type=registry,ref=${DEVENV_BUILD_CACHE_REGISTRY}/${DEVENV_BUILD_CACHE_REPO}:compose-app,registry.insecure=true
+      cache_to:
+        - type=registry,ref=${DEVENV_BUILD_CACHE_REGISTRY}/${DEVENV_BUILD_CACHE_REPO}:compose-app,mode=max,registry.insecure=true
+    ports:
+      - "8080:80"
+```
+
+That example shares a single Compose cache manifest: concurrent exports use
+last-writer-wins semantics. Use separate cache references with explicit imports
+when building different branches concurrently. BuildKit cache mounts (`RUN
+--mount=type=cache`) and independent builders such as Dagger have their own cache
+lifecycle; registry cache exports do not automatically share those mutable stores.
+
+Normal `down` retains both per-worktree engine data and the shared registries.
+`down --all` removes the registry containers but retains their volumes.
+`down --all --delete-data` deletes both caches **and all inner application data**.
+To reclaim only disposable local build cache, run `docker builder prune` inside
+the affected workspace. Shared build-cache registry blobs are retained until
+explicit data deletion; no automatic garbage collection is configured.
+
+### Upgrading from the host Docker proxy
+
+Rebuild the CLI and image, then recreate each workspace using `devenv down` and
+`devenv up --tunnel` (or plain `devenv up` for its saved tunnel setting). A running
+workspace using the old proxy is rejected with migration instructions. Existing
+host-engine images, containers, and volumes are not migrated or deleted. Apps
+previously started through the proxy must be stopped on the host and restarted
+inside devenv. Legacy proxy options are accepted for compatibility and cleanup;
+new `setup`/`up` calls do not start a host Docker proxy. Check `devenv tunnel
+status`: a saved custom origin is preserved; the nested port-8080 workflow uses
+`http://workspace:8080`. See the tunnel configuration section to change an older
+custom allocation.
 
 ## `devenv down`
 
 `devenv down` removes the current git worktree's container and stops its tunnel
-container. The proxy, other worktrees, the Herdr profile, the SSH alias, the
+container. The shared registries, engine data, other worktrees, the Herdr profile, the SSH alias, the
 registry row, the host key, and the Herdr volume stay. With no container
 running it succeeds. Outside a git worktree it fails. `devenv stop` does the
 same thing.
 
 `devenv down --all` tears down every running container managed by the CLI for
-this root, including the safe Docker socket proxy and every worktree. It is
+this root, including the shared registries, any legacy proxy, and every worktree. It is
 also idempotent: running it when no managed containers exist should succeed.
 
 `devenv down --all` must not delete identity or durable state:
@@ -528,6 +621,7 @@ also idempotent: running it when no managed containers exist should succeed.
 - Do not delete `~/.devenv/gitconfig`.
 - Do not delete `~/.devenv/home` or tool state such as `~/.codex`.
 - Do not remove the Codex SQLite Docker volume unless `--delete-data` is passed.
+- Do not remove the per-worktree Docker data volumes or shared registry volumes.
 - Do not delete `~/.devenv/ssh` or its keypair.
 - Do not delete `~/.devenv/herdr`: the host key, the worktree registry, and
   the rendered SSH config are what keep each worktree on the same Herdr
@@ -541,7 +635,7 @@ also idempotent: running it when no managed containers exist should succeed.
   is added.
 
 `devenv down --all --delete-data` is the only command that removes `~/.devenv`,
-the Herdr volumes, and the include block. `--delete-data` without `--all` is
+the Herdr volumes, Docker engine/registry volumes, and the include block. `--delete-data` without `--all` is
 an error.
 
 The next `devenv setup` or launcher command should be able to recreate runtime
@@ -555,7 +649,7 @@ Git 2.55.0, Git LFS, OpenSSH client and server, tini, GitHub CLI (`gh`), herdr, 
 kubectl, Dagger CLI (`dagger`), `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
-bash, build tools, common dev headers, and the Docker CLI with the Compose
+bash, build tools, common dev headers, and Docker Engine, Buildx, and the Compose
 plugin.
 
 GNU `time` is `/usr/bin/time` so it does not replace the shell builtin. To
@@ -574,8 +668,8 @@ dialog pre-accepted) seeded into `~/.claude/settings.json` when unset, and `gemi
 are wrappers in `/usr/local/lib/agent-defaults/bin` that add
 `--approval-mode=yolo` / `--yolo` unless a mode flag is passed. User config
 still wins for Codex, Grok and Claude Code. Do not mount sensitive host paths
-into containers where these agents run with broad autonomy. Use the safe Docker
-socket proxy if Docker CLI access is needed.
+into containers where these agents run with broad autonomy. Docker CLI access uses the workspace
+engine; privileged DinD is intended for trusted development workloads.
 
 Codex is installed from `codex-package-*` at
 `/usr/local/lib/codex/<version>-<target>`. `/usr/local/bin/codex` points at
@@ -664,7 +758,7 @@ docker build -f dev.Dockerfile -t local-dev:latest .
 Public ingress is **off by default**. The host CLI owns Cloudflare allocation and
 automatically runs `cloudflare/cloudflared:2026.11.0` in a separate Docker container
 for each enabled worktree. Docker pulls the image as needed; no host `cloudflared`
-installation is required. Use a local Docker Desktop Unix-socket context so Docker
+installation is required. Use a local OrbStack or Docker Desktop Unix-socket context so Docker
 can mount the private host runtime-token file into the tunnel container.
 
 Create a Cloudflare API token restricted to the development account with
@@ -684,8 +778,9 @@ devenv tunnel configure \
 
 The domain must exactly match the Cloudflare zone. The origin is one HTTP Docker
 network alias and explicit port. For a server running directly inside the
-workspace, omit `--origin` to use `http://workspace:8080`. Houston instead attaches
-its sibling proxy as `houston` on the provided ingress network.
+workspace, omit `--origin` to use `http://workspace:8080`. With nested Docker, publish the application to workspace port 8080. An explicit
+origin such as `http://houston:80` is only for a separately host-managed container
+on the outer ingress network; inner containers cannot join that outer network.
 
 Both the main repository checkout and linked worktrees are supported, regardless
 of the checked-out branch. From the desired Git checkout on the **host**:
@@ -725,11 +820,10 @@ mounted read-only into the tunnel container, which runs with a read-only root
 filesystem and dropped capabilities. Neither credential is passed in container
 environment variables or command arguments, or mounted into the workspace.
 
-The workspace retains full Docker capabilities for builds and Dagger. An agent
-with that access can inspect sibling containers and reach their credentials.
-The sidecar keeps secrets out of workspace files and environment, but does not
-provide isolation against Docker API access. Separating the engines is a future
-improvement; use a dedicated development account and zone.
+The workspace Docker API controls only its inner containers. The Cloudflare
+sidecar stays on the outer engine and its token is not mounted in the workspace.
+Privileged DinD is not a hardened security boundary; use a dedicated development
+account and zone.
 
 ```sh
 devenv stop                 # Stop this workspace and tunnel container; retain URLs.
@@ -763,7 +857,7 @@ before upgrading to this sidecar version.
 
 ### First test: JSON over public HTTPS
 
-This test only needs the env branch, Docker Desktop and your development
+This test only needs the env branch, OrbStack or Docker Desktop and your development
 Cloudflare account/zone. Houston and houston-hub do not need to be merged or run.
 Use this env checkout, or any Git checkout without an existing tunnel allocation;
 no second worktree is required. If it already has a tunnel with a different
@@ -861,3 +955,15 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o devenv ./cmd/devenv
 ```
 
 Run `devenv setup` using the new binary to update the installed host copy.
+
+### Nested Docker integration check
+
+```sh
+DEVENV_TEST_DIND=1 go test ./cmd/devenv -run '^TestNestedDocker$' -v
+```
+
+This creates uniquely named temporary resources without host bind mounts. It
+checks two independent port-8080 origins, the shared pull-through registry,
+build-layer reuse by a fresh daemon, and image/volume persistence across workspace
+recreation. It uses the production supervisor and Docker wrapper with the pinned
+Engine release; it does not rebuild the image's unrelated language toolchains.

@@ -38,7 +38,8 @@ func tunnelSessionEnvironment(t *testing.T, dir, username string) (string, tunne
 	script := section("workspace_env_names=(", "cat > /etc/ssh/sshd_config.d/devenv.conf") + section("herdr_env=(", "herdr_server_running()") + `printf '%s\n' "$session_env"; printf '%s\n' "${herdr_env[@]}"`
 	profile := tunnelState{ID: testTunnelID, Domain: "example.dev"}
 	shell := exec.Command("bash", "-eu", "-c", script)
-	shell.Env = append([]string{"PATH=" + os.Getenv("PATH"), "home_dir=" + dir, "user_name=" + username, "sqlite_home=" + dir, "image_path=" + os.Getenv("PATH"), "DOCKER_HOST=tcp://proxy:2375", "GIT_CONFIG_GLOBAL=/devenv/gitconfig"}, profile.environment()...)
+	runtimeEnv := append(engineEnvironment(worktree{CommonDir: "/repo/.git"}, worktreeRecord{ID: "test-worktree"}), profile.environment()...)
+	shell.Env = append([]string{"PATH=" + os.Getenv("PATH"), "home_dir=" + dir, "user_name=" + username, "sqlite_home=" + dir, "image_path=" + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL=/devenv/gitconfig"}, runtimeEnv...)
 	out, err := shell.CombinedOutput()
 	if err != nil {
 		t.Fatalf("entrypoint environment generation: %s %v", out, err)
@@ -47,7 +48,7 @@ func tunnelSessionEnvironment(t *testing.T, dir, username string) (string, tunne
 	if !ok {
 		t.Fatal("missing generated environment")
 	}
-	for _, value := range profile.environment() {
+	for _, value := range runtimeEnv {
 		if !strings.Contains(session, " "+value) {
 			t.Fatalf("SSH configuration missing %s", value)
 		}

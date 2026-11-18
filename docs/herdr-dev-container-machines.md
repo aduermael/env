@@ -1,5 +1,9 @@
 # Herdr machines for dev containers
 
+> Docker runtime update: the host proxy and whole-state-root mount described in
+> this historical plan have been replaced by per-worktree Docker engines and
+> shared registries. See [Docker inside devenv](../README.md#docker-inside-devenv).
+
 A macOS Herdr TUI connects to dev-env containers as saved SSH machines. Each git worktree has at most one dev container. The container is the machine: it stays up when the Herdr client disconnects. `dev down` stops that worktree. The next `dev up` brings the same Herdr machine back.
 
 This is the implementation plan. It describes behavior to build. It does not change the image or the CLI by itself.

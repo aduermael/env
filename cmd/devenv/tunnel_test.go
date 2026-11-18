@@ -334,7 +334,7 @@ func TestTunnelOriginDefaultDoesNotRetargetExistingAllocation(t *testing.T) {
 	docker := `#!/bin/sh
 case "$1" in
 ps) exit 0 ;;
-inspect) printf '[]\n' ;;
+container) printf '[]\n' ;;
 *) echo "unexpected fixture Docker command" >&2; exit 1 ;;
 esac
 `

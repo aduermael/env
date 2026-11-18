@@ -1,5 +1,9 @@
 # herdr-core machines for dev containers
 
+> Docker runtime update: the host proxy and whole-state-root mount described in
+> this historical plan have been replaced by per-worktree Docker engines and
+> shared registries. See [Docker inside devenv](../README.md#docker-inside-devenv).
+
 The Herdr desktop app sees each dev container as a saved machine, next to the Herdr TUI profile that `dev up` already creates. The container runs a pinned `herdr-core` (`hc`). The app's local core connects to it over the same SSH alias, port, key, and host key the TUI uses. `dev down` and `dev up` bring the same machine back.
 
 This is the follow-up to [Herdr machines for dev containers](herdr-dev-container-machines.md). Everything that plan built stays: the registry, the `devenv-<id>` alias, the Herdr keys, `sshd` as the main process, and the per-worktree volume. This plan adds one binary to the image, one symlink to the entrypoint, and one registration step to `dev up`.
