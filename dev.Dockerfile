@@ -602,6 +602,9 @@ RUN set -eux; \
 
 # Dagger CLI tracks the newest v1.0.0-beta.N release. Keep this layer after
 # kubectl so version bumps only rebuild this install and the cheap final setup.
+# The CLI is installed outside PATH: /usr/local/bin/dagger is the devenv
+# wrapper (runtime/dagger) that sends it to the machine's shared engine, and
+# that engine runs the release pinned here (see the image label at the end).
 ARG DAGGER_CLI_VERSION=v1.0.0-beta.28
 ARG DAGGER_CLI_SHA256_AMD64=abd9f7e95f03c517e33cfbab0917fa1593d73e088d69304259884f8a47cc61a1
 ARG DAGGER_CLI_SHA256_ARM64=e69ad1f5f68024cf38098bce902decfb33085809eef39d36646dc7d5ab6bfacb
@@ -618,12 +621,10 @@ RUN set -eux; \
     echo "${dagger_sha256}  /tmp/${dagger_file}" | sha256sum -c -; \
     mkdir -p /tmp/dagger-cli; \
     tar --no-same-owner -xzf "/tmp/${dagger_file}" -C /tmp/dagger-cli; \
-    install -m 0755 /tmp/dagger-cli/dagger /usr/local/bin/dagger; \
+    install -D -m 0755 /tmp/dagger-cli/dagger /usr/local/libexec/dagger; \
     rm -rf /tmp/dagger-cli "/tmp/${dagger_file}"; \
-    test -x /usr/local/bin/dagger; \
-    hash -r; \
-    test "$(command -v dagger)" = "/usr/local/bin/dagger"; \
-    dagger_ver_out="$(dagger version)"; \
+    test -x /usr/local/libexec/dagger; \
+    dagger_ver_out="$(/usr/local/libexec/dagger version)"; \
     printf '%s\n' "${dagger_ver_out}"; \
     printf '%s\n' "${dagger_ver_out}" | grep -F "${DAGGER_CLI_VERSION}"
 
@@ -898,12 +899,23 @@ install -m 0600 -o root -g root "${devenv_dir}/herdr/ssh_host_ed25519_key" /run/
 install -m 0644 -o root -g root "${devenv_dir}/herdr/ssh_host_ed25519_key.pub" /run/devenv/ssh_host_ed25519_key.pub
 install -m 0600 -o "${uid}" -g "${gid}" "${devenv_dir}/herdr/id_ed25519.pub" /run/devenv/authorized_keys
 
+# devenv runs one Dagger engine for every workspace on the machine and passes
+# its address here. Sessions get DAGGER_ENGINE below. The dagger wrapper reads
+# this file instead, so a command without the session environment (sudo,
+# env -i) still reaches that engine and does not start a private one.
+rm -f /run/devenv/dagger-engine
+if [[ "${DAGGER_ENGINE:-}" == tcp://* && -n "${DEVENV_DAGGER_ENGINE_IMAGE:-}" ]]; then
+    printf '%s\n' "${DAGGER_ENGINE}" "${DEVENV_DAGGER_ENGINE_IMAGE}" > /run/devenv/dagger-engine
+    chmod 0644 /run/devenv/dagger-engine
+fi
+
 # OpenSSH 9.2 keeps only the first SetEnv directive, so every variable goes
 # on that one line. This is what an SSH-started herdr server inherits.
 workspace_env_names=(
     DOCKER_HOST GIT_CONFIG_GLOBAL BUILDX_CONFIG BUILDX_BUILDER
     DEVENV_DOCKER_ID DEVENV_DOCKER_MIRROR DEVENV_BUILD_CACHE_REGISTRY DEVENV_BUILD_CACHE_REPO
     DEVENV_INSTANCE_ID DEVENV_PUBLIC_URL DEVENV_FILES_URL DEVENV_INGRESS_NETWORK
+    DAGGER_ENGINE DEVENV_DAGGER_ENGINE_IMAGE
 )
 session_env="HOME=${home_dir} USER=${user_name} LOGNAME=${user_name} SHELL=/bin/bash"
 session_env+=" CODEX_HOME=${home_dir}/.codex CODEX_SQLITE_HOME=${sqlite_home}"
@@ -1145,6 +1157,15 @@ RUN set -eux; \
 COPY --chmod=0755 runtime/devenv-engine /usr/local/lib/devenv/devenv-engine
 COPY --chmod=0755 runtime/docker /usr/local/bin/docker
 LABEL com.aduermael.env.devenv.engine="dind-v1"
+
+# devenv starts one shared Dagger engine per machine from
+# registry.dagger.io/engine at this release, so the engine always matches the
+# CLI installed above. scripts/update-dagger.sh moves both by changing the ARG.
+COPY --chmod=0755 runtime/dagger /usr/local/bin/dagger
+LABEL com.aduermael.env.devenv.dagger="${DAGGER_CLI_VERSION}"
+RUN set -eux; \
+    test "$(command -v dagger)" = "/usr/local/bin/dagger"; \
+    dagger version | grep -F "${DAGGER_CLI_VERSION}"
 
 WORKDIR /workspace
 ENTRYPOINT ["tini", "--", "/usr/local/bin/dev-entrypoint"]

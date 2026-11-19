@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# One Dagger engine serves every workspace on this machine. Send the CLI to it
+# and stop with a reason when that engine cannot be used. Left alone, the CLI
+# starts a private engine in this workspace's Docker with a cold cache, works
+# against an engine of another release without saying so, and waits ten
+# minutes for an engine that is down.
+set -euo pipefail
+real=/usr/local/libexec/dagger
+state=/run/devenv/dagger-engine
+any_release=devenv-dagger
+
+# The entrypoint writes the state file when devenv runs a shared engine.
+[[ -e "$state" ]] || exec "$real" "$@"
+shared=
+image=
+{ IFS= read -r shared && IFS= read -r image; } < "$state" || true
+
+# Sessions carry DAGGER_ENGINE for the shared engine. Opting out means the
+# CLI's own engine, so that default has to go. Any other value is the caller's.
+if [[ "${DEVENV_SHARED_DAGGER:-1}" != 1 ]]; then
+    [[ -z "$shared" || "${DAGGER_ENGINE:-}" != "$shared" ]] || unset DAGGER_ENGINE
+    exec "$real" "$@"
+fi
+
+die() {
+    printf 'devenv: %s\n' "$@" >&2
+    exit 1
+}
+
+[[ "$shared" == tcp://*:* && -n "$image" ]] ||
+    die "$state does not describe the shared Dagger engine; recreate this workspace from the Mac with dev down, then dev up"
+
+# An engine started from an image is the shared engine when it is the same
+# release: a hook that pins --engine=image+docker://IMAGE keeps working and
+# keeps its pin. Any other release would be a second engine, so it is refused.
+# Cloud, another address, or a named container remain the caller's choice.
+route() {
+    routed=$1
+    case "$1" in
+        image://*|image+*://*|docker-image://*)
+            local wanted=${1#*://}
+            wanted=${wanted%%@*}
+            [[ "$wanted" == "$image" ]] || die \
+                "an engine from $wanted was requested, but this machine runs one shared Dagger engine, $image." \
+                "A second engine is not started. Use that release (a branch that pins another one needs its pin updated)," \
+                "or set DEVENV_SHARED_DAGGER=0 to run a private engine in this workspace's own Docker."
+            routed=$shared
+            ;;
+    esac
+}
+
+# These print, or talk to Dagger Cloud, without an engine, so they also run
+# while the shared engine is down. "dagger check --help" is not one of them:
+# it loads the project's checks through an engine.
+command=${1:-}
+needs_engine=true
+case "$command" in
+    version|help|completion|cloud|login|logout|-h|--help) needs_engine=false ;;
+esac
+
+# --engine wins over --cloud, which wins over DAGGER_ENGINE, which wins over
+# the two older variables (dagger help engine).
+args=()
+flag=
+cloud=false
+while (($#)); do
+    case "$1" in
+        --)
+            break
+            ;;
+        --engine=*)
+            route "${1#--engine=}"
+            flag=$routed
+            args+=("--engine=$routed")
+            ;;
+        --engine)
+            (($# > 1)) || break
+            route "$2"
+            flag=$routed
+            args+=(--engine "$routed")
+            shift
+            ;;
+        --cloud|--cloud=1|--cloud=[tT]|--cloud=true|--cloud=TRUE|--cloud=True)
+            cloud=true
+            args+=("$1")
+            ;;
+        *)
+            args+=("$1")
+            ;;
+    esac
+    shift
+done
+# Function arguments after "--" are never read as engine flags.
+args+=("$@")
+
+if [[ -n "$flag" ]]; then
+    engine=$flag
+elif [[ "$cloud" == true ]]; then
+    engine=cloud
+else
+    # The session's DAGGER_ENGINE is a default, not the caller's choice. It
+    # must not hide a caller who still selects an engine with an older
+    # variable, which the CLI would rank below it.
+    choice=${DAGGER_ENGINE:-$shared}
+    if [[ "$choice" == "$shared" ]]; then
+        if [[ -n "${DAGGER_CLOUD_ENGINE:-}" ]]; then
+            choice=cloud
+        elif [[ -n "${_EXPERIMENTAL_DAGGER_RUNNER_HOST:-}" ]]; then
+            choice=$_EXPERIMENTAL_DAGGER_RUNNER_HOST
+        fi
+    fi
+    route "$choice"
+    export DAGGER_ENGINE=$routed
+    engine=$routed
+fi
+[[ "$engine" == "$shared" && "$needs_engine" == true ]] || exec "$real" ${args[@]+"${args[@]}"}
+
+address=${shared#tcp://}
+host=${address%:*}
+port=${address##*:}
+resolves() { getent hosts "$1" >/dev/null 2>&1; }
+answers() { resolves "$host" && timeout 2 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$host" "$port" 2>/dev/null; }
+
+# The engine restarts by itself after a crash, so give it a moment. Shell
+# completion must never hold the prompt.
+limit=${DEVENV_DAGGER_WAIT:-30}
+[[ "$command" != __complete* ]] || limit=0
+SECONDS=0
+told=false
+until answers; do
+    # The address names this CLI's release. An engine of another release
+    # answers only to the general name.
+    if ! resolves "$host" && resolves "$any_release"; then
+        die "this workspace's Dagger CLI needs the engine $image, but the shared Dagger engine on this machine runs another release." \
+            "A second engine is not started. From the Mac, recreate this workspace with dev down, then dev up." \
+            "If it still fails, run devenv setup --skip-build there so the engine matches the image."
+    fi
+    ((SECONDS < limit)) || die \
+        "the shared Dagger engine $image did not answer at $shared within ${limit}s." \
+        "It is stopped, restarting, or out of disk space; every workspace on this machine depends on it." \
+        "From the Mac: docker ps -a --filter label=com.aduermael.env.devenv.role=dagger-engine, then devenv up to start it." \
+        "A private engine is not started in its place."
+    [[ "$told" == true ]] || printf 'devenv: waiting for the shared Dagger engine at %s\n' "$shared" >&2
+    told=true
+    sleep 1
+done
+exec "$real" ${args[@]+"${args[@]}"}

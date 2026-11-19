@@ -90,8 +90,12 @@ grep -Fq 'dagger_file="dagger_${DAGGER_CLI_VERSION}_linux_${dagger_arch}.tar.gz"
     || die "update-dagger.sh rewrite dropped Dagger archive filename line"
 grep -Fq 'https://dl.dagger.io/dagger/releases/${dagger_version}/${dagger_file}' "$fixture_df" \
     || die "update-dagger.sh rewrite dropped Dagger download URL"
-grep -Fq 'install -m 0755 /tmp/dagger-cli/dagger /usr/local/bin/dagger' "$fixture_df" \
+grep -Fq 'install -D -m 0755 /tmp/dagger-cli/dagger /usr/local/libexec/dagger' "$fixture_df" \
     || die "update-dagger.sh rewrite dropped dagger install line"
+
+# The shared engine is pinned through this label, so it follows the ARG.
+grep -Fxq 'LABEL com.aduermael.env.devenv.dagger="${DAGGER_CLI_VERSION}"' "$fixture_df" \
+    || die "update-dagger.sh rewrite dropped the shared engine release label"
 
 printf 'ok: update-dagger.sh restored Dagger CLI SHA ARGs for %s\n' "$version"
 printf 'ALL CHECKS PASSED\n'

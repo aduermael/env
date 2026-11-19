@@ -56,10 +56,18 @@ grep -Fq 'dagger_file="dagger_${DAGGER_CLI_VERSION}_linux_${dagger_arch}.tar.gz"
     || die "Dockerfile does not download dagger_\${DAGGER_CLI_VERSION}_linux_\${dagger_arch}.tar.gz"
 grep -Fq 'https://dl.dagger.io/dagger/releases/${dagger_version}/${dagger_file}' "$dockerfile" \
     || die "Dockerfile does not fetch Dagger CLI from dl.dagger.io/dagger/releases"
-grep -Fq 'install -m 0755 /tmp/dagger-cli/dagger /usr/local/bin/dagger' "$dockerfile" \
-    || die "Dockerfile does not install /usr/local/bin/dagger"
-grep -Fq 'test -x /usr/local/bin/dagger' "$dockerfile" \
-    || die "Dockerfile does not assert /usr/local/bin/dagger is executable"
+# The CLI lives outside PATH; /usr/local/bin/dagger is the devenv wrapper that
+# sends it to the machine's shared engine, which runs the same pinned release.
+grep -Fq 'install -D -m 0755 /tmp/dagger-cli/dagger /usr/local/libexec/dagger' "$dockerfile" \
+    || die "Dockerfile does not install /usr/local/libexec/dagger"
+grep -Fq 'test -x /usr/local/libexec/dagger' "$dockerfile" \
+    || die "Dockerfile does not assert /usr/local/libexec/dagger is executable"
+grep -Fxq 'COPY --chmod=0755 runtime/dagger /usr/local/bin/dagger' "$dockerfile" \
+    || die "Dockerfile does not install the dagger wrapper at /usr/local/bin/dagger"
+grep -Fxq 'LABEL com.aduermael.env.devenv.dagger="${DAGGER_CLI_VERSION}"' "$dockerfile" \
+    || die "Dockerfile does not pin the shared Dagger engine to DAGGER_CLI_VERSION"
+grep -Fq 'real=/usr/local/libexec/dagger' "${repo_root}/runtime/dagger" \
+    || die "runtime/dagger does not run /usr/local/libexec/dagger"
 grep -Eq 'dagger version' "$dockerfile" \
     || die "Dockerfile does not invoke dagger version during the image build"
 grep -Fq 'grep -F "${DAGGER_CLI_VERSION}"' "$dockerfile" \
@@ -81,6 +89,14 @@ verify_archive() {
 
 verify_archive "amd64" "$sha_amd64"
 verify_archive "arm64" "$sha_arm64"
+
+# The shared engine image is the same release; the tag must exist.
+engine_status="$(curl -sS -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 2 \
+    -H 'Accept: application/vnd.oci.image.index.v1+json' \
+    -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+    "https://registry.dagger.io/v2/engine/manifests/${version}")"
+[[ "$engine_status" == "200" ]] || die "registry.dagger.io/engine:${version} is not published (HTTP ${engine_status})"
+printf 'ok: registry.dagger.io/engine:%s is published\n' "$version"
 
 printf 'ok: Dagger CLI %s is pinned with in-build version check\n' "$version"
 printf 'ALL CHECKS PASSED\n'
