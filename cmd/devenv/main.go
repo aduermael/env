@@ -58,6 +58,9 @@ type config struct {
 	Tunnel       bool
 	TunnelSet    bool
 	PublicTunnel *tunnelState
+	// DaggerVersion is the Dagger CLI release in Image. The shared Dagger
+	// engine runs the same release. Empty means no shared engine.
+	DaggerVersion string
 }
 
 type bridgeConfig struct {
@@ -406,10 +409,14 @@ func setup(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 		status(cfg, stdout, "skip: dev image build")
 	}
 
-	if err := requireEngineImage(ctx, cfg); err != nil {
+	cfg.DaggerVersion, err = requireEngineImage(ctx, cfg)
+	if err != nil {
 		return err
 	}
 	if err := ensureDockerCaches(ctx, cfg, stdout); err != nil {
+		return err
+	}
+	if err := ensureDaggerEngine(ctx, cfg, cfg.DaggerVersion, true, stdout, stderr); err != nil {
 		return err
 	}
 
@@ -1375,7 +1382,7 @@ func printUsage(w io.Writer) {
   %[1]s tunnel configure|status|retire [flags]
 
 Commands:
-  setup    Prepare ~/.devenv, build the dev image, start shared Docker caches, and install zsh functions.
+  setup    Prepare ~/.devenv, build the dev image, start shared Docker caches and the shared Dagger engine, and install zsh functions.
   up       Start the dev container for the current git worktree and register it as a Herdr machine.
   stop     Remove the dev container for the current git worktree. The Herdr machine and registry row stay.
   down     Remove the dev container for the current git worktree. --all removes every managed container. State in ~/.devenv is kept unless --all --delete-data is set.
@@ -1404,7 +1411,7 @@ Stop flags:
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
 
 Down flags:
-  --all                      Remove every managed container for this root, including registries and any legacy proxy.
+  --all                      Remove every managed container for this root, including registries, the Dagger engine, and any legacy proxy.
   --root path                State directory (default $HOME/.devenv or DEVENV_HOME).
   --delete-data              With --all, delete state and Docker volumes, including inner application data.
 `, exe, defaultDevImage, defaultProxyImage, defaultProxyContainer, defaultProxyPort, defaultDevImage, defaultProxyContainer, defaultProxyPort)

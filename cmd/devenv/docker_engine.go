@@ -105,13 +105,7 @@ func registryMatches(info containerInspect, cfg config, mirror bool) bool {
 	return false
 }
 
-func ensureDockerCaches(ctx context.Context, cfg config, stdout io.Writer) error {
-	// setup and up can run concurrently, independently of the worktree lock.
-	unlock, err := lockFile(filepath.Join(cfg.Root, "run", "docker-caches.lock"))
-	if err != nil {
-		return err
-	}
-	defer unlock()
+func ensureCacheNetwork(ctx context.Context, cfg config) error {
 	out, err := dockerOutput(ctx, "network", "inspect", cacheNetwork(cfg))
 	if err == nil {
 		var networks []struct{ Labels map[string]string }
@@ -121,12 +115,23 @@ func ensureDockerCaches(ctx context.Context, cfg config, stdout io.Writer) error
 		if len(networks) != 1 || !ownedDockerResource(networks[0].Labels, cfg, "docker-cache-network") {
 			return fmt.Errorf("network %s is not owned by this devenv root", cacheNetwork(cfg))
 		}
-	} else if isDockerNotFound(err) {
-		_, err = dockerOutput(ctx, "network", "create", "--driver", "bridge", "--label", labelManaged+"=true", "--label", labelRoot+"="+cfg.Root, "--label", labelRole+"=docker-cache-network", cacheNetwork(cfg))
-		if err != nil {
-			return err
-		}
-	} else {
+		return nil
+	}
+	if !isDockerNotFound(err) {
+		return err
+	}
+	_, err = dockerOutput(ctx, "network", "create", "--driver", "bridge", "--label", labelManaged+"=true", "--label", labelRoot+"="+cfg.Root, "--label", labelRole+"=docker-cache-network", cacheNetwork(cfg))
+	return err
+}
+
+func ensureDockerCaches(ctx context.Context, cfg config, stdout io.Writer) error {
+	// setup and up can run concurrently, independently of the worktree lock.
+	unlock, err := lockFile(filepath.Join(cfg.Root, "run", "docker-caches.lock"))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := ensureCacheNetwork(ctx, cfg); err != nil {
 		return err
 	}
 	for _, mirror := range []bool{true, false} {
@@ -161,15 +166,15 @@ func ensureDockerCaches(ctx context.Context, cfg config, stdout io.Writer) error
 				return err
 			}
 		}
-		if err := waitForRegistry(ctx, name); err != nil {
+		if err := waitForHealthy(ctx, "registry", name, 65*time.Second); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func waitForRegistry(ctx context.Context, name string) error {
-	ctx, cancel := context.WithTimeout(ctx, 65*time.Second)
+func waitForHealthy(ctx context.Context, service, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
 		info, exists, err := inspectContainer(ctx, name)
@@ -177,14 +182,14 @@ func waitForRegistry(ctx context.Context, name string) error {
 			return err
 		}
 		if !exists || !info.State.Running {
-			return fmt.Errorf("registry %s stopped; inspect docker logs %s", name, name)
+			return fmt.Errorf("%s %s stopped; inspect docker logs %s", service, name, name)
 		}
 		if info.State.Health != nil && info.State.Health.Status == "healthy" {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("registry %s not healthy: %w", name, ctx.Err())
+			return fmt.Errorf("%s %s not healthy: %w; inspect docker logs %s", service, name, ctx.Err(), name)
 		case <-time.After(time.Second):
 		}
 	}
@@ -219,7 +224,7 @@ func removeDockerCacheResources(ctx context.Context, cfg config, deleteData bool
 	if !deleteData {
 		return nil
 	}
-	for _, role := range []string{"engine-data", "image-mirror", "build-cache"} {
+	for _, role := range []string{"engine-data", "image-mirror", "build-cache", daggerEngineRole} {
 		out, err := dockerOutput(ctx, "volume", "ls", "-q", "--filter", "label="+labelManaged+"=true", "--filter", "label="+labelRoot+"="+cfg.Root, "--filter", "label="+labelRole+"="+role)
 		if err != nil {
 			return err
@@ -241,13 +246,23 @@ func engineEnvironment(wt worktree, rec worktreeRecord) []string {
 		"DEVENV_BUILD_CACHE_REPO=" + buildCacheRepository(wt), "BUILDX_CONFIG=/run/devenv/buildx", "BUILDX_BUILDER=default"}
 }
 
-func requireEngineImage(ctx context.Context, cfg config) error {
-	out, err := dockerOutput(ctx, "image", "inspect", cfg.Image, "--format", "{{index .Config.Labels \""+engineLabel+"\"}}")
+// The image must run its own Docker engine and name the Dagger release it
+// installs: the shared Dagger engine runs that same release.
+func requireEngineImage(ctx context.Context, cfg config) (string, error) {
+	out, err := dockerOutput(ctx, "image", "inspect", cfg.Image, "--format", "{{json .Config.Labels}}")
 	if err != nil {
-		return err
+		return "", err
 	}
-	if strings.TrimSpace(out) != engineVersion {
-		return fmt.Errorf("image %s predates nested Docker; rebuild it with devenv setup", cfg.Image)
+	var labels map[string]string
+	if err := json.Unmarshal([]byte(out), &labels); err != nil {
+		return "", fmt.Errorf("parse labels of image %s: %w", cfg.Image, err)
 	}
-	return nil
+	if labels[engineLabel] != engineVersion {
+		return "", fmt.Errorf("image %s predates nested Docker; rebuild it with devenv setup", cfg.Image)
+	}
+	version := labels[daggerLabel]
+	if !daggerVersionPattern.MatchString(version) {
+		return "", fmt.Errorf("image %s does not name the Dagger release for the shared engine (label %s=%q); rebuild it with devenv setup", cfg.Image, daggerLabel, version)
+	}
+	return version, nil
 }

@@ -39,6 +39,7 @@ func tunnelSessionEnvironment(t *testing.T, dir, username string) (string, tunne
 	profile := tunnelState{ID: testTunnelID, Domain: "example.dev"}
 	shell := exec.Command("bash", "-eu", "-c", script)
 	runtimeEnv := append(engineEnvironment(worktree{CommonDir: "/repo/.git"}, worktreeRecord{ID: "test-worktree"}), profile.environment()...)
+	runtimeEnv = append(runtimeEnv, daggerEnvironment(testDaggerVersion)...)
 	shell.Env = append([]string{"PATH=" + os.Getenv("PATH"), "home_dir=" + dir, "user_name=" + username, "sqlite_home=" + dir, "image_path=" + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL=/devenv/gitconfig"}, runtimeEnv...)
 	out, err := shell.CombinedOutput()
 	if err != nil {

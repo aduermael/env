@@ -162,6 +162,12 @@ To pin a specific release instead:
 scripts/update-dagger.sh v0.21.9
 ```
 
+The same pin selects the shared Dagger engine: the image carries the release
+as a label, and `devenv setup` runs `registry.dagger.io/engine` at that release.
+After a bump, `devenv setup` rebuilds the image and replaces the engine, and
+every running workspace has to be recreated with `dev down` and `dev up`. See
+[Shared Dagger engine](#shared-dagger-engine).
+
 ### Update Claude Code CLI in the dev image
 
 Claude Code CLI is pinned in `dev.Dockerfile` as the npm package
@@ -255,7 +261,7 @@ devenv down [--all] [flags]
 ```
 
 `devenv setup` builds the local dev image, prepares `~/.devenv`, starts the shared Docker
-image mirror and build-cache registry, verifies them, and installs shell commands in zshrc. After updating
+image mirror, build-cache registry, and Dagger engine, verifies them, and installs shell commands in zshrc. After updating
 zshrc it prints:
 
 ```text
@@ -285,7 +291,7 @@ stop its tunnel container, retaining its Cloudflare allocation and URLs. The
 generated `dev down` calls `devenv down` and appends any flags you passed.
 With no container running it succeeds. Outside a git worktree it fails.
 
-`devenv down --all` removes every managed runtime container, including shared registries, cache networks, and any legacy proxy
+`devenv down --all` removes every managed runtime container, including shared registries, the shared Dagger engine, cache networks, and any legacy proxy
 bridge and proxy network. It keeps `~/.devenv` state unless `--delete-data` is
 passed. `dev down --all` is `devenv down --all`.
 
@@ -309,6 +315,8 @@ The command must:
 - Install or update the generated zshrc block that defines `dev`.
 - Start or repair the shared image mirror and writable build-cache registry,
   then wait for both registry health checks.
+- Start the shared Dagger engine at the Dagger release the image installs, or
+  replace an engine of another release, then wait until it accepts clients.
 
 `setup` must not overwrite existing identity or persisted tool state. Existing
 `~/.devenv/gitconfig`, SSH keys, and `~/.devenv/home` contents are user state.
@@ -461,6 +469,10 @@ Mount contract:
   including the daemon-managed containerd store. It persists across sessions.
 - Workspaces share a root-scoped network with the image mirror and writable
   build-cache registry. Registry data lives on separate persistent volumes.
+- One Dagger engine per devenv root runs on that network. Workspaces receive
+  `DAGGER_ENGINE=tcp://devenv-dagger-<release>:1234`. The engine's state
+  volume is mounted at `/var/lib/dagger` in the engine container only, never
+  in a workspace.
 - The repository root of the current git worktree is mounted at `/workspace`.
 - `~/.devenv/home/.config/herdr`, `~/.devenv/home/.local/state/herdr`, and
   `~/.devenv/home/.local/state/herdr-core` are symlinks onto the per-worktree
@@ -581,15 +593,102 @@ services:
 That example shares a single Compose cache manifest: concurrent exports use
 last-writer-wins semantics. Use separate cache references with explicit imports
 when building different branches concurrently. BuildKit cache mounts (`RUN
---mount=type=cache`) and independent builders such as Dagger have their own cache
-lifecycle; registry cache exports do not automatically share those mutable stores.
+--mount=type=cache`) have their own cache lifecycle; registry cache exports do
+not automatically share those mutable stores. Dagger does not use these
+registries: it runs on the shared engine described below.
 
-Normal `down` retains both per-worktree engine data and the shared registries.
-`down --all` removes the registry containers but retains their volumes.
-`down --all --delete-data` deletes both caches **and all inner application data**.
+Normal `down` retains per-worktree engine data, the shared registries, and the
+shared Dagger engine. `down --all` removes the registry and Dagger engine
+containers but retains their volumes.
+`down --all --delete-data` deletes these caches **and all inner application data**.
 To reclaim only disposable local build cache, run `docker builder prune` inside
 the affected workspace. Shared build-cache registry blobs are retained until
 explicit data deletion; no automatic garbage collection is configured.
+
+### Shared Dagger engine
+
+Left to itself, the Dagger CLI starts `dagger-engine-<release>` through the
+workspace's private Docker socket and keeps its BuildKit cache, module cache,
+and cache volumes in that daemon. Every worktree then downloads the same
+browsers, Go modules, and image layers again. The registries above do not
+help: they share image pulls and `docker build` layers, not the Dagger cache.
+
+`setup` and `up` therefore run one Dagger engine per devenv root (one per
+machine with the default `~/.devenv`), next to the registries:
+
+- It runs as Dagger starts its own engine: `--privileged`, `--restart always`,
+  from `registry.dagger.io/engine` at the release the image installs.
+- Its state is one named Docker volume mounted at `/var/lib/dagger`, on the
+  outer engine's real filesystem. Dagger is very slow when that directory is an
+  overlay mount. Only this one container mounts the volume. Two engines on one
+  state directory corrupt it.
+- It listens on `tcp://0.0.0.0:1234` on the root's cache network. The port is
+  not published on the Mac: `tcp://` has no authentication, and whoever reaches
+  it controls a privileged container.
+- The workspace keeps its private Docker daemon and the exclusive lock on its
+  data volume. Checks that use Docker still get that daemon. Only the Dagger
+  runner moved out.
+
+Each workspace gets `DAGGER_ENGINE=tcp://devenv-dagger-<release>:1234`. The
+entrypoint sets it for SSH sessions and Herdr panes, so `dagger check` and Git
+hooks use the shared engine without an export. `container://` and
+`docker-container://` cannot work here: a workspace's Docker socket does not
+see the engine container.
+
+**What sharing costs.** Worktrees are no longer isolated from each other in
+Dagger:
+
+- Cached layers and named cache volumes belong to every workspace on the
+  engine. A cache volume one worktree fills or corrupts is the one all others
+  mount, and anything written into a layer or cache volume is readable from
+  every workspace.
+- An engine restart ends every running Dagger session on the machine, and a
+  full disk stops Dagger in all workspaces at once. The engine's cache grows
+  on the same disk as the workspaces' Docker data.
+- All workspaces compete for the same engine's CPU and memory.
+
+**One release for CLI and engine.** The engine address contains the release,
+so a CLI only finds an engine of its own release. This is enforced because
+Dagger does not enforce it: a `v1.0.0-beta.28` CLI runs against a
+`v1.0.0-beta.25` engine without a warning, and waits ten minutes for an engine
+that is down. `/usr/local/bin/dagger` is a wrapper around the real CLI
+(`/usr/local/libexec/dagger`) that checks the engine first:
+
+- An engine of another release, or no engine, ends the command at once with
+  the reason and what to do. It never starts a private engine instead.
+- `--engine=image+docker://IMAGE` (also `image://` and `docker-image://`, and
+  the same values in `DAGGER_ENGINE`) asks for an engine started from an
+  image. When `IMAGE` is the shared engine's release, the command runs on the
+  shared engine, so a hook that pins its engine image keeps working and keeps
+  its pin. Any other release is refused, because it would be a second engine.
+- Other engines stay the caller's choice: `--engine=cloud`, another `tcp://`
+  or `ssh://` address, a named container.
+- `DEVENV_SHARED_DAGGER=0` turns the wrapper off for one command or shell. The
+  CLI then starts a private engine in the workspace's own Docker.
+
+`devenv setup` moves the engine to the release of the image it built. Running
+workspaces keep their old CLI: `setup` lists them, and `dagger` fails in them
+with the reason until each is recreated with `dev down` and `dev up`. `devenv
+up` only creates or starts the engine. If the engine runs another release than
+the image, `up` says so and leaves it alone, because replacing it ends the
+sessions of every other workspace. The cache survives a release change: the
+new engine opens the same volume.
+
+`down --all` removes the engine container and keeps its volume. `down --all
+--delete-data` deletes the volume. To delete only the Dagger cache:
+
+```sh
+devenv down --all
+docker volume rm "$(docker volume ls -q --filter label=com.aduermael.env.devenv.role=dagger-engine)"
+```
+
+A workspace created before this change still has the private engine the CLI
+started, with its own cache, in its inner Docker. It restarts with that
+daemon. After recreating the workspace, remove it from a shell inside:
+
+```sh
+docker ps -aq --filter name=dagger-engine- | xargs -r docker rm -f -v
+```
 
 ### Upgrading from the host Docker proxy
 
@@ -607,13 +706,13 @@ custom allocation.
 ## `devenv down`
 
 `devenv down` removes the current git worktree's container and stops its tunnel
-container. The shared registries, engine data, other worktrees, the Herdr profile, the SSH alias, the
+container. The shared registries, the shared Dagger engine, engine data, other worktrees, the Herdr profile, the SSH alias, the
 registry row, the host key, and the Herdr volume stay. With no container
 running it succeeds. Outside a git worktree it fails. `devenv stop` does the
 same thing.
 
 `devenv down --all` tears down every running container managed by the CLI for
-this root, including the shared registries, any legacy proxy, and every worktree. It is
+this root, including the shared registries, the shared Dagger engine, any legacy proxy, and every worktree. It is
 also idempotent: running it when no managed containers exist should succeed.
 
 `devenv down --all` must not delete identity or durable state:
@@ -621,7 +720,8 @@ also idempotent: running it when no managed containers exist should succeed.
 - Do not delete `~/.devenv/gitconfig`.
 - Do not delete `~/.devenv/home` or tool state such as `~/.codex`.
 - Do not remove the Codex SQLite Docker volume unless `--delete-data` is passed.
-- Do not remove the per-worktree Docker data volumes or shared registry volumes.
+- Do not remove the per-worktree Docker data volumes, the shared registry
+  volumes, or the shared Dagger engine's state volume.
 - Do not delete `~/.devenv/ssh` or its keypair.
 - Do not delete `~/.devenv/herdr`: the host key, the worktree registry, and
   the rendered SSH config are what keep each worktree on the same Herdr
@@ -635,7 +735,7 @@ also idempotent: running it when no managed containers exist should succeed.
   is added.
 
 `devenv down --all --delete-data` is the only command that removes `~/.devenv`,
-the Herdr volumes, Docker engine/registry volumes, and the include block. `--delete-data` without `--all` is
+the Herdr volumes, Docker engine/registry volumes, the Dagger engine's state volume, and the include block. `--delete-data` without `--all` is
 an error.
 
 The next `devenv setup` or launcher command should be able to recreate runtime
@@ -646,7 +746,7 @@ containers without forcing the user to re-authenticate tools.
 The dev image includes Go, Rust, Node 24, Python with pip/venv, Lua, Luau,
 Codex CLI, Claude Code CLI, Gemini CLI, Grok Build CLI, Cursor CLI, Homebrew,
 Git 2.55.0, Git LFS, OpenSSH client and server, tini, GitHub CLI (`gh`), herdr, herdr-core (`hc`), Google Cloud CLI (`gcloud`),
-kubectl, Dagger CLI (`dagger`), `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
+kubectl, Dagger CLI (`dagger`, behind the shared-engine wrapper), `gke-gcloud-auth-plugin`, Modal CLI, Blender CLI, `ping`, jq,
 ripgrep (`rg`), `tree`, GNU `time` (`/usr/bin/time`), `less`, `pkg-config`, zip/unzip, pnpm, Bazelisk with
 Bazel 9.2.0 pre-cached, PostgreSQL, ffmpeg, ImageMagick, pandoc, WeasyPrint,
 bash, build tools, common dev headers, and Docker Engine, Buildx, and the Compose
@@ -967,3 +1067,18 @@ checks two independent port-8080 origins, the shared pull-through registry,
 build-layer reuse by a fresh daemon, and image/volume persistence across workspace
 recreation. It uses the production supervisor and Docker wrapper with the pinned
 Engine release; it does not rebuild the image's unrelated language toolchains.
+
+### Shared Dagger engine integration check
+
+```sh
+DEVENV_TEST_DAGGER=1 go test ./cmd/devenv -run '^TestSharedDaggerEngine$' -v
+```
+
+This starts the engine for a temporary devenv root with the release pinned in
+`dev.Dockerfile`, using uniquely named temporary resources without host bind
+mounts. Two separate containers run the pinned CLI behind the production
+wrapper. The second one must get the first one's step from the engine's cache
+and find the first one's data in a named cache volume. The test also checks
+that the engine state is a volume and not an overlay mount, that a second
+engine cannot start on it, that another release is refused with the reason,
+and that the cache survives recreating the engine container.

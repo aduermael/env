@@ -724,6 +724,12 @@ func workspaceRunArgs(cfg config, wt worktree, rec worktreeRecord, uid, gid int)
 	for _, value := range engineEnvironment(wt, rec) {
 		args = append(args, "-e", value)
 	}
+	if cfg.DaggerVersion != "" {
+		args = append(args, "--label", daggerLabel+"="+cfg.DaggerVersion)
+		for _, value := range daggerEnvironment(cfg.DaggerVersion) {
+			args = append(args, "-e", value)
+		}
+	}
 	if wt.RepoRoot != containerWorkspace {
 		args = append(args, "-v", wt.RepoRoot+":"+wt.RepoRoot)
 	}
@@ -835,10 +841,14 @@ func up(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	if err := ensureHerdrKeys(cfg, stdout, stderr, sshKeygen); err != nil {
 		return err
 	}
-	if err := requireEngineImage(ctx, cfg); err != nil {
+	cfg.DaggerVersion, err = requireEngineImage(ctx, cfg)
+	if err != nil {
 		return err
 	}
 	if err := ensureDockerCaches(ctx, cfg, stdout); err != nil {
+		return err
+	}
+	if err := ensureDaggerEngine(ctx, cfg, cfg.DaggerVersion, false, stdout, stderr); err != nil {
 		return err
 	}
 
@@ -921,6 +931,12 @@ func ensureWorkspaceContainer(ctx context.Context, cfg config, wt worktree, stdo
 		}
 		if !workspaceTunnelMatches(info, cfg.PublicTunnel) {
 			return worktreeRecord{}, false, errors.New("running workspace has different tunnel metadata; stop it before restarting")
+		}
+		if started := info.Config.Labels[daggerLabel]; started != cfg.DaggerVersion {
+			if started == "" {
+				started = "a private engine"
+			}
+			notice(stderr, "%s runs Dagger on %s, not on the shared engine %s; recreate it with devenv down, then devenv up", name, started, daggerEngineImage(cfg.DaggerVersion))
 		}
 		status(cfg, stdout, "ok: %s is running", name)
 		return rec, false, nil
