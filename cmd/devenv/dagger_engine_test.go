@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testDaggerVersion = "v1.0.0-beta.28"
@@ -73,16 +74,17 @@ func TestDaggerEngineAddressFollowsTheRelease(t *testing.T) {
 	if daggerEngineHost("v1.0.0-beta.28") == daggerEngineHost("v1.0.0-beta.29") {
 		t.Fatal("two releases resolve to the same engine")
 	}
-	for _, version := range []string{"v1.0.0-beta.28", "v0.21.9", "v1.0.0"} {
+	for _, version := range []string{"v1.0.0-beta.28", "v1.0.0", "v2.3.4"} {
 		if !daggerVersionPattern.MatchString(version) {
 			t.Fatalf("rejected release %q", version)
 		}
 	}
-	for _, version := range []string{"", "latest", "1.0.0", "v1.0", "v1.0.0-beta.28 --privileged", "v1.0.0@sha256:abc", "v1.0.0-beta-28", "v1.0.0-Beta.1", "evil/image:v1.0.0"} {
+	// v0.21.9: a CLI from before DAGGER_ENGINE would start its own engine.
+	for _, version := range []string{"", "latest", "1.0.0", "v1.0", "v0.21.9", "v1.0.0-beta.28 --privileged", "v1.0.0@sha256:abc", "v1.0.0-beta-28", "v1.0.0-Beta.1", "evil/image:v1.0.0"} {
 		if daggerVersionPattern.MatchString(version) {
 			t.Fatalf("accepted release %q", version)
 		}
-		if err := ensureDaggerEngine(context.Background(), config{Root: t.TempDir()}, version, true, os.Stdout, os.Stderr); err == nil {
+		if err := ensureDaggerEngine(context.Background(), config{Root: t.TempDir(), DaggerVersion: version}, true, os.Stdout, os.Stderr); err == nil {
 			t.Fatalf("started an engine for release %q", version)
 		}
 	}
@@ -102,8 +104,17 @@ func TestWorkspaceUsesSharedDaggerEngineAndKeepsItsDocker(t *testing.T) {
 			t.Fatalf("%s = %q (present=%v), want %q", name, got, ok, want)
 		}
 	}
-	if !containsArgPair(args, "--label", daggerLabel+"="+testDaggerVersion) {
+	if !containsArgPair(args, "--label", daggerWorkspaceLabel+"="+testDaggerVersion) {
 		t.Fatalf("workspace does not record its Dagger release: %v", args)
+	}
+	// Containers inherit image labels. A workspace started without the shared
+	// engine must not look as if it had one.
+	dockerfile, err := os.ReadFile("../../dev.Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if daggerWorkspaceLabel == daggerLabel || strings.Contains(string(dockerfile), daggerWorkspaceLabel) {
+		t.Fatal("the image sets the label that marks a workspace on the shared engine")
 	}
 	if !containsArgPair(args, "--network", cacheNetwork(cfg)) {
 		t.Fatalf("workspace cannot reach the engine's network: %v", args)
@@ -243,6 +254,15 @@ func TestDaggerWrapper(t *testing.T) {
 	// Engines the caller names stay the caller's choice, even while the shared one is down.
 	expect(down, nil, []string{"check", "--engine=cloud"}, "engine=unset\ncheck\n--engine=cloud\n")
 	expect(down, nil, []string{"check", "--cloud"}, "engine=unset\ncheck\n--cloud\n")
+	expect(down, nil, []string{"check", "--cloud=1"}, "engine=unset\ncheck\n--cloud=1\n")
+	// The session's DAGGER_ENGINE must not hide the older variables, which
+	// the CLI ranks below it.
+	session := "DAGGER_ENGINE=" + shared
+	expect(down, []string{session, "DAGGER_CLOUD_ENGINE=1"}, []string{"check"}, "engine=cloud\ncheck\n")
+	expect(down, []string{session, "_EXPERIMENTAL_DAGGER_RUNNER_HOST=ssh://builder"}, []string{"check"}, "engine=ssh://builder\ncheck\n")
+	expect(up, []string{session, "_EXPERIMENTAL_DAGGER_RUNNER_HOST=docker-image://" + image}, []string{"check"}, "engine="+shared+"\ncheck\n")
+	refuse(up, []string{session, "_EXPERIMENTAL_DAGGER_RUNNER_HOST=docker-image://" + other}, []string{"check"}, "second engine")
+	expect(down, []string{"DAGGER_ENGINE=cloud", "_EXPERIMENTAL_DAGGER_RUNNER_HOST=ssh://builder"}, []string{"check"}, "engine=cloud\ncheck\n")
 	expect(down, nil, []string{"--engine", "tcp://elsewhere:1234", "check"}, "engine=unset\n--engine\ntcp://elsewhere:1234\ncheck\n")
 	expect(down, []string{"DAGGER_ENGINE=ssh://builder"}, []string{"check"}, "engine=ssh://builder\ncheck\n")
 	// Function arguments are not engine flags.
@@ -254,9 +274,24 @@ func TestDaggerWrapper(t *testing.T) {
 	refuse(down, nil, []string{"check"}, "did not answer", shared, "private engine is not started")
 	listener.Close()
 	refuse(up, nil, []string{"check"}, "did not answer")
-	// Commands that need no engine, and the opt-out, always run.
-	expect(down, nil, []string{"version"}, "engine=unset\nversion\n")
-	expect(down, []string{"DEVENV_SHARED_DAGGER=0"}, []string{"check", "--engine=image+docker://" + other}, "engine=unset\ncheck\n--engine=image+docker://"+other+"\n")
+	// Commands that need no engine run while it is down, and still never
+	// point at a private one. Help for checks is loaded through an engine.
+	for _, args := range [][]string{{"version"}, {"--help"}, {"help", "engine"}, {"completion", "bash"}, {"login"}} {
+		expect(down, nil, args, "engine="+shared+"\n"+strings.Join(args, "\n")+"\n")
+		expect(otherRelease, nil, args, "engine="+shared+"\n"+strings.Join(args, "\n")+"\n")
+	}
+	refuse(down, nil, []string{"check", "--help"}, "did not answer")
+	// Shell completion does not wait for the engine.
+	started := time.Now()
+	if out, err := run(down, []string{"DEVENV_DAGGER_WAIT=30"}, "__complete", "check", ""); err == nil || time.Since(started) > 10*time.Second {
+		t.Fatalf("completion waited %s for the engine: %q", time.Since(started), out)
+	}
+	// The opt-out leaves the CLI alone and drops the session's engine, so
+	// the CLI starts its own. A value the caller set is kept.
+	optOut := "DEVENV_SHARED_DAGGER=0"
+	expect(down, []string{optOut}, []string{"check", "--engine=image+docker://" + other}, "engine=unset\ncheck\n--engine=image+docker://"+other+"\n")
+	expect(down, []string{optOut, session}, []string{"check"}, "engine=unset\ncheck\n")
+	expect(down, []string{optOut, "DAGGER_ENGINE=cloud"}, []string{"check"}, "engine=cloud\ncheck\n")
 
 	if err := os.WriteFile(state, []byte("cloud\n"), 0644); err != nil {
 		t.Fatal(err)

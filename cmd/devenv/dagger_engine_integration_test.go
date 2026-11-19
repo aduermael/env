@@ -61,7 +61,7 @@ func TestSharedDaggerEngine(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	cfg := config{Root: dir, Image: "fixture"}
+	cfg := config{Root: dir, Image: "fixture", DaggerVersion: version}
 	if err := os.MkdirAll(filepath.Join(cfg.Root, "run"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -72,12 +72,12 @@ func TestSharedDaggerEngine(t *testing.T) {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
-	if err := ensureDaggerEngine(ctx, cfg, version, true, os.Stdout, os.Stderr); err != nil {
+	if err := ensureDaggerEngine(ctx, cfg, true, os.Stdout, os.Stderr); err != nil {
 		t.Fatal(err)
 	}
 	first := run("inspect", engine, "--format", "{{.Id}}")
 	for _, replace := range []bool{false, true} {
-		if err := ensureDaggerEngine(ctx, cfg, version, replace, os.Stdout, os.Stderr); err != nil {
+		if err := ensureDaggerEngine(ctx, cfg, replace, os.Stdout, os.Stderr); err != nil {
 			t.Fatalf("idempotent engine startup: %v", err)
 		}
 	}
@@ -126,6 +126,16 @@ func TestSharedDaggerEngine(t *testing.T) {
 			args = append(args, "-e", value)
 		}
 		run(append(args, fixture, "bash", "-euc", "mkdir -p /run/devenv\n"+entrypointDaggerSection(t)+"exec sleep infinity")...)
+		// Without the file the wrapper is the plain CLI: wait for the entrypoint lines.
+		for attempt := 0; ; attempt++ {
+			if _, err := dockerOutput(ctx, "exec", name, "test", "-s", "/run/devenv/dagger-engine"); err == nil {
+				break
+			}
+			if attempt == 50 {
+				t.Fatalf("%s did not record the shared engine", name)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 		return name
 	}
 	// env -i: the engine is found without any export in the calling shell.
@@ -203,7 +213,7 @@ func TestSharedDaggerEngine(t *testing.T) {
 	}
 	refused(a, nil, nil, "did not answer", "private engine is not started")
 	refused(a, nil, []string{"--engine=image+docker://" + image}, "did not answer")
-	if err := ensureDaggerEngine(ctx, cfg, version, false, os.Stdout, os.Stderr); err != nil {
+	if err := ensureDaggerEngine(ctx, cfg, false, os.Stdout, os.Stderr); err != nil {
 		t.Fatal(err)
 	}
 	if run("inspect", engine, "--format", "{{.Id}}") == first {

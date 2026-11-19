@@ -262,7 +262,7 @@ func requireEngineImage(ctx context.Context, cfg config) (string, error) {
 	}
 	version := labels[daggerLabel]
 	if !daggerVersionPattern.MatchString(version) {
-		return "", fmt.Errorf("image %s does not name the Dagger release for the shared engine (label %s=%q); rebuild it with devenv setup", cfg.Image, daggerLabel, version)
+		return "", fmt.Errorf("image %s does not name a Dagger release the shared engine can run (label %s=%q): it needs v1.0.0 or later, whose CLI reads DAGGER_ENGINE; rebuild the image with devenv setup", cfg.Image, daggerLabel, version)
 	}
 	return version, nil
 }

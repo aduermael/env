@@ -58,8 +58,8 @@ type config struct {
 	Tunnel       bool
 	TunnelSet    bool
 	PublicTunnel *tunnelState
-	// DaggerVersion is the Dagger CLI release in Image. The shared Dagger
-	// engine runs the same release. Empty means no shared engine.
+	// DaggerVersion is the Dagger CLI release in Image, read from the image
+	// by setup and up. The shared Dagger engine runs the same release.
 	DaggerVersion string
 }
 
@@ -416,7 +416,7 @@ func setup(ctx context.Context, cfg config, stdout, stderr io.Writer) error {
 	if err := ensureDockerCaches(ctx, cfg, stdout); err != nil {
 		return err
 	}
-	if err := ensureDaggerEngine(ctx, cfg, cfg.DaggerVersion, true, stdout, stderr); err != nil {
+	if err := ensureDaggerEngine(ctx, cfg, true, stdout, stderr); err != nil {
 		return err
 	}
 

@@ -21,8 +21,11 @@ import (
 const (
 	// The workspace image names the Dagger CLI release it installs. The image
 	// chooses only the version: the engine repository is fixed here.
-	daggerLabel            = "com.aduermael.env.devenv.dagger"
-	daggerSpecLabel        = "com.aduermael.env.devenv.dagger-spec"
+	daggerLabel     = "com.aduermael.env.devenv.dagger"
+	daggerSpecLabel = "com.aduermael.env.devenv.dagger-spec"
+	// A workspace records the engine release devenv pointed it at. The key
+	// differs from the image's label, which every container inherits.
+	daggerWorkspaceLabel   = "com.aduermael.env.devenv.shared-dagger"
 	daggerEngineRepository = "registry.dagger.io/engine"
 	daggerEngineRole       = "dagger-engine"
 	daggerEngineAlias      = "devenv-dagger"
@@ -31,8 +34,10 @@ const (
 	daggerReadyTimeout     = 3 * time.Minute
 )
 
-// Exactly three numeric parts keep the alias below unambiguous.
-var daggerVersionPattern = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9a-z]+(\.[0-9a-z]+)*)?$`)
+// Exactly three numeric parts keep the alias below unambiguous. The CLI reads
+// DAGGER_ENGINE from v1 on; an older one would ignore the shared engine and
+// start its own.
+var daggerVersionPattern = regexp.MustCompile(`^v([1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9a-z]+(\.[0-9a-z]+)*)?$`)
 
 func daggerEngineImage(version string) string { return daggerEngineRepository + ":" + version }
 func daggerEngineName(cfg config) string      { return cachePrefix(cfg) + "-" + daggerEngineRole }
@@ -57,8 +62,9 @@ func daggerEnvironment(version string) []string {
 
 // The engine runs as Dagger starts its own: privileged, always restarted, its
 // state on one volume. That volume belongs to this single container; two
-// engines on one state directory corrupt it. The port is not published on the
-// Mac: tcp:// has no authentication, and only the root's cache network needs it.
+// engines on one state directory corrupt it. tcp:// has no authentication, so
+// the port is not published: it is reachable from the root's cache network,
+// which includes containers started inside a workspace.
 func daggerEngineArgs(cfg config, version string) []string {
 	name := daggerEngineName(cfg)
 	options := []string{"run", "-d", "--name", name, "--restart", "always", "--privileged",
@@ -87,7 +93,8 @@ func daggerSpec(args []string) string {
 // setup moves the engine to the image's release. up only creates or starts
 // it: replacing a running engine ends every session on it, so two images with
 // different releases must not take it from each other on each up.
-func ensureDaggerEngine(ctx context.Context, cfg config, version string, replace bool, stdout, stderr io.Writer) error {
+func ensureDaggerEngine(ctx context.Context, cfg config, replace bool, stdout, stderr io.Writer) error {
+	version := cfg.DaggerVersion
 	if !daggerVersionPattern.MatchString(version) {
 		return fmt.Errorf("unsupported Dagger release %q", version)
 	}
@@ -117,6 +124,13 @@ func ensureDaggerEngine(ctx context.Context, cfg config, version string, replace
 		notice(stderr, "the shared Dagger engine runs %s, but image %s installs Dagger %s; dagger stops with an error in workspaces of this image", daggerEngineImage(running), cfg.Image, version)
 		notice(stderr, "move the engine with: devenv setup --skip-build (workspaces on %s must then be recreated)", running)
 		return nil
+	}
+	// Fetch the image while the old engine still serves: a failed download
+	// must not leave the machine without an engine.
+	if !exists || !current {
+		if err := pullIfMissing(ctx, cfg, daggerEngineImage(version), stdout, stderr); err != nil {
+			return err
+		}
 	}
 	if exists && !current && replace {
 		status(cfg, stdout, "replace: shared Dagger engine %s", daggerEngineImage(running))
@@ -152,13 +166,24 @@ func ensureDaggerEngine(ctx context.Context, cfg config, version string, replace
 	return nil
 }
 
+func pullIfMissing(ctx context.Context, cfg config, image string, stdout, stderr io.Writer) error {
+	if _, err := dockerOutput(ctx, "image", "inspect", image, "--format", "{{.Id}}"); err == nil {
+		return nil
+	}
+	status(cfg, stdout, "pull: %s", image)
+	if err := dockerRun(ctx, stdoutFor(cfg, stdout), stderrFor(cfg, stderr), "pull", image); err != nil {
+		return fmt.Errorf("pull %s: %w", image, err)
+	}
+	return nil
+}
+
 // Running workspaces keep the image they started with. One with another
 // Dagger release gets an error from its dagger wrapper; one from before the
 // shared engine still starts a private engine.
 func staleDaggerWorkspaces(ctx context.Context, cfg config, version string) ([]string, error) {
 	out, err := dockerOutput(ctx, "ps",
 		"--filter", "label="+labelManaged+"=true", "--filter", "label="+labelRole+"=workspace", "--filter", "label="+labelRoot+"="+cfg.Root,
-		"--format", `{{.Names}} {{.Label "`+daggerLabel+`"}}`)
+		"--format", `{{.Names}} {{.Label "`+daggerWorkspaceLabel+`"}}`)
 	if err != nil {
 		return nil, fmt.Errorf("list workspaces: %w", err)
 	}

@@ -159,11 +159,13 @@ scripts/update-dagger.sh
 To pin a specific release instead:
 
 ```sh
-scripts/update-dagger.sh v0.21.9
+scripts/update-dagger.sh v1.0.0-beta.28
 ```
 
 The same pin selects the shared Dagger engine: the image carries the release
 as a label, and `devenv setup` runs `registry.dagger.io/engine` at that release.
+The release must be v1.0.0 or later. An older CLI does not read
+`DAGGER_ENGINE` and would start its own engine, so `setup` and `up` reject it.
 After a bump, `devenv setup` rebuilds the image and replaces the engine, and
 every running workspace has to be recreated with `dev down` and `dev up`. See
 [Shared Dagger engine](#shared-dagger-engine).
@@ -622,9 +624,10 @@ machine with the default `~/.devenv`), next to the registries:
   outer engine's real filesystem. Dagger is very slow when that directory is an
   overlay mount. Only this one container mounts the volume. Two engines on one
   state directory corrupt it.
-- It listens on `tcp://0.0.0.0:1234` on the root's cache network. The port is
-  not published on the Mac: `tcp://` has no authentication, and whoever reaches
-  it controls a privileged container.
+- It listens on `tcp://0.0.0.0:1234` on the root's cache network. `tcp://` has
+  no authentication, and whoever reaches the port controls a privileged
+  container, so it is not published on the Mac's interfaces. See below for who
+  can still reach it.
 - The workspace keeps its private Docker daemon and the exclusive lock on its
   data volume. Checks that use Docker still get that daemon. Only the Dagger
   runner moved out.
@@ -646,6 +649,12 @@ Dagger:
   full disk stops Dagger in all workspaces at once. The engine's cache grows
   on the same disk as the workspaces' Docker data.
 - All workspaces compete for the same engine's CPU and memory.
+- The engine's port is open to more than the workspaces. A container started
+  inside a workspace reaches the cache network through that workspace, so an
+  application or test container can connect to the engine too. On OrbStack,
+  container addresses are also reachable from the Mac itself. Before, a
+  private engine was reachable only through its workspace's Docker socket.
+  Treat everything that runs in any workspace as able to use the engine.
 
 **One release for CLI and engine.** The engine address contains the release,
 so a CLI only finds an engine of its own release. This is enforced because
@@ -662,17 +671,26 @@ that is down. `/usr/local/bin/dagger` is a wrapper around the real CLI
   shared engine, so a hook that pins its engine image keeps working and keeps
   its pin. Any other release is refused, because it would be a second engine.
 - Other engines stay the caller's choice: `--engine=cloud`, another `tcp://`
-  or `ssh://` address, a named container.
+  or `ssh://` address, a named container. The older `DAGGER_CLOUD_ENGINE` and
+  `_EXPERIMENTAL_DAGGER_RUNNER_HOST` variables keep working: the session's
+  `DAGGER_ENGINE` is a default and does not override them.
+- `dagger version`, `dagger help`, `dagger --help`, `dagger completion`, and
+  the Dagger Cloud commands need no engine and run while it is down. `dagger
+  check --help` does need one, because it lists the project's checks.
 - `DEVENV_SHARED_DAGGER=0` turns the wrapper off for one command or shell. The
-  CLI then starts a private engine in the workspace's own Docker.
+  CLI then starts a private engine in the workspace's own Docker, unless the
+  caller selected another engine.
 
-`devenv setup` moves the engine to the release of the image it built. Running
+`devenv setup` moves the engine to the release of the image it built. It
+downloads the new engine image first, so a failed download leaves the old
+engine running. Running
 workspaces keep their old CLI: `setup` lists them, and `dagger` fails in them
 with the reason until each is recreated with `dev down` and `dev up`. `devenv
 up` only creates or starts the engine. If the engine runs another release than
 the image, `up` says so and leaves it alone, because replacing it ends the
-sessions of every other workspace. The cache survives a release change: the
-new engine opens the same volume.
+sessions of every other workspace. If the engine cannot start, `up` reports it
+and starts the workspace anyway: only Dagger is affected. The cache survives a
+release change: the new engine opens the same volume.
 
 `down --all` removes the engine container and keeps its volume. `down --all
 --delete-data` deletes the volume. To delete only the Dagger cache:
