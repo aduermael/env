@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"os"
@@ -88,11 +87,7 @@ func ensureTunnelNetwork(ctx context.Context, s tunnelState) error {
 }
 func tunnelArgs(s tunnelState, path string) []string {
 	token := filepath.Join(filepath.Dir(path), "runtime-token")
-	var mount strings.Builder
-	w := csv.NewWriter(&mount)
-	_ = w.Write([]string{"type=bind", "source=" + token, "target=" + tunnelTokenPath, "readonly"})
-	w.Flush()
-	return []string{"run", "-d", "--name", s.container(), "--restart", "unless-stopped", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--label", labelManaged + "=true", "--label", labelRole + "=tunnel", "--label", labelRoot + "=" + s.Root, "--label", labelWorktreeGitDir + "=" + s.GitDir, "--label", tunnelInstanceLabel + "=" + s.ID, "--network", s.network(), "--mount", strings.TrimSuffix(mount.String(), "\n"), tunnelImage, "tunnel", "--no-autoupdate", "run", "--token-file", tunnelTokenPath}
+	return []string{"run", "-d", "--name", s.container(), "--restart", "unless-stopped", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--label", labelManaged + "=true", "--label", labelRole + "=tunnel", "--label", labelRoot + "=" + s.Root, "--label", labelWorktreeGitDir + "=" + s.GitDir, "--label", tunnelInstanceLabel + "=" + s.ID, "--network", s.network(), "--mount", mountOption("type=bind", "source="+token, "target="+tunnelTokenPath, "readonly"), tunnelImage, "tunnel", "--no-autoupdate", "run", "--token-file", tunnelTokenPath}
 }
 func startTunnelRuntime(ctx context.Context, s *tunnelState, path string, api cloudflareAPI) error {
 	if err := s.checkRuntimeUpgrade(); err != nil {

@@ -630,9 +630,10 @@ machine with the default `~/.devenv`), next to the registries:
   no authentication, and whoever reaches the port controls a privileged
   container, so it is not published on the Mac's interfaces. See below for who
   can still reach it.
-- It pulls Docker Hub images through `devenv-mirror:5000`, as the workspace
-  daemons do. devenv writes `~/.devenv/dagger-engine.json`, mounted read-only
-  at `/etc/dagger/engine.json`. When the mirror is down or fails a pull, the
+- It pulls Docker Hub images through the mirror, as the workspace daemons do,
+  under the name `devenv-mirror.<cache network>:5000`: the engine's own DNS
+  resolver does not forward names without a dot, such as `devenv-mirror`. devenv writes `dagger-engine-<digest>.json` to the devenv root
+  (`~/.devenv` by default), mounted read-only at `/etc/dagger/engine.json`. When the mirror is down or fails a pull, the
   engine pulls from Docker Hub directly. Other registries are not mirrored.
 - The workspace keeps its private Docker daemon and the exclusive lock on its
   data volume. Checks that use Docker still get that daemon. Only the Dagger
@@ -697,9 +698,9 @@ the image, `up` says so and leaves it alone, because replacing it ends the
 sessions of every other workspace. If the engine cannot start, `up` reports it
 and starts the workspace anyway: only Dagger is affected. The cache survives a
 release change: the new engine opens the same volume. When a devenv update
-changes only the engine's settings, `up` also leaves the running engine alone
-and says so; `devenv setup --skip-build` replaces it on the same volume, and
-workspaces need not be recreated.
+changes only the engine's settings, `up` also leaves a running engine alone
+and says so; it replaces a stopped one. `devenv setup --skip-build` replaces
+it on the same volume, and workspaces need not be recreated.
 
 `down --all` removes the engine container and keeps its volume. `down --all
 --delete-data` deletes the volume. To delete only the Dagger cache:

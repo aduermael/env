@@ -10,9 +10,9 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,25 +63,46 @@ func daggerEnvironment(version string) []string {
 	return []string{"DAGGER_ENGINE=" + daggerEngineAddress(version), "DEVENV_DAGGER_ENGINE_IMAGE=" + daggerEngineImage(version)}
 }
 
+// The engine resolves names through its own dnsmasq, which forwards only
+// names with a dot. Docker's DNS also answers alias.network.
+func daggerMirrorAddress(cfg config) string {
+	host, port, _ := net.SplitHostPort(mirrorAddress)
+	return net.JoinHostPort(host+"."+cacheNetwork(cfg), port)
+}
+
 // Docker Hub pulls go through the root's mirror, as for workspace daemons.
 // The mirror speaks plain HTTP. When it is down or lacks an image, BuildKit
 // moves on to Docker Hub itself; other registries are not mirrored.
-func daggerEngineConfig() []byte {
-	data, _ := json.Marshal(map[string]map[string]map[string]any{"registries": {
-		"docker.io":   {"mirrors": []string{mirrorAddress}},
-		mirrorAddress: {"http": true},
-	}})
-	return data
+func daggerEngineConfig(cfg config) []byte {
+	return fmt.Appendf(nil, `{"registries":{"docker.io":{"mirrors":[%q]},%[1]q:{"http":true}}}`, daggerMirrorAddress(cfg))
 }
 
-func daggerConfigFile(cfg config) string { return filepath.Join(cfg.Root, "dagger-engine.json") }
+// The name follows the content, so an engine that keeps older settings keeps
+// its own file, and the file's path in the spec covers what it holds.
+func daggerConfigFile(cfg config, engineConfig []byte) string {
+	sum := sha256.Sum256(engineConfig)
+	return filepath.Join(cfg.Root, fmt.Sprintf("dagger-engine-%x.json", sum[:8]))
+}
+
+// Renamed into place: an engine restarting meanwhile never reads half a file.
+func writeDaggerEngineConfig(cfg config, engineConfig []byte) error {
+	path := daggerConfigFile(cfg, engineConfig)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, engineConfig, 0o644); err != nil {
+		return fmt.Errorf("write Dagger engine configuration: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("write Dagger engine configuration: %w", err)
+	}
+	return nil
+}
 
 // The engine runs as Dagger starts its own: privileged, always restarted, its
 // state on one volume. That volume belongs to this single container; two
 // engines on one state directory corrupt it. tcp:// has no authentication, so
 // the port is not published: it is reachable from the root's cache network,
-// which includes containers started inside a workspace. The spec covers the
-// engine's configuration too: its file keeps one path whatever it holds.
+// which includes containers started inside a workspace.
 func daggerEngineArgs(cfg config, version string, engineConfig []byte) []string {
 	name := daggerEngineName(cfg)
 	options := []string{"run", "-d", "--name", name, "--restart", "always", "--privileged",
@@ -89,12 +110,12 @@ func daggerEngineArgs(cfg config, version string, engineConfig []byte) []string 
 		"--label", daggerLabel + "=" + version,
 		"--network", cacheNetwork(cfg), "--network-alias", daggerEngineAlias, "--network-alias", daggerEngineHost(version),
 		"--mount", "type=volume,source=" + name + ",target=" + daggerStatePath,
-		"--mount", "type=bind,source=" + daggerConfigFile(cfg) + ",target=" + daggerConfigPath + ",readonly",
+		"--mount", mountOption("type=bind", "source="+daggerConfigFile(cfg, engineConfig), "target="+daggerConfigPath, "readonly"),
 		"--health-cmd", "buildctl dial-stdio --timeout 2",
 		"--health-interval", "5s", "--health-timeout", "5s", "--health-retries", "6", "--health-start-period", "60s"}
 	command := []string{daggerEngineImage(version),
 		"--addr", "unix:///run/dagger/engine.sock", "--addr", "tcp://0.0.0.0:" + daggerEnginePort}
-	spec := sha256.Sum256([]byte(strings.Join(append(append(append([]string{}, options...), command...), string(engineConfig)), "\x00")))
+	spec := sha256.Sum256([]byte(strings.Join(append(append([]string{}, options...), command...), "\x00")))
 	options = append(options, "--label", fmt.Sprintf("%s=%x", daggerSpecLabel, spec[:8]))
 	return append(options, command...)
 }
@@ -128,7 +149,7 @@ func ensureDaggerEngine(ctx context.Context, cfg config, replace bool, stdout, s
 	if err := ensureDockerVolume(ctx, cfg, name, daggerEngineRole); err != nil {
 		return err
 	}
-	engineConfig := daggerEngineConfig()
+	engineConfig := daggerEngineConfig(cfg)
 	args := daggerEngineArgs(cfg, version, engineConfig)
 	info, exists, err := inspectContainer(ctx, name)
 	if err != nil {
@@ -144,17 +165,20 @@ func ensureDaggerEngine(ctx context.Context, cfg config, replace bool, stdout, s
 		notice(stderr, "move the engine with: devenv setup --skip-build (workspaces on %s must then be recreated)", running)
 		return nil
 	}
-	if exists && !current && !replace {
+	// up keeps a running engine of this release with older settings, which
+	// serves sessions. A stopped one serves none and takes the new settings.
+	renew := exists && !current && (replace || !info.State.Running)
+	if exists && !current && !renew {
 		notice(stderr, "the shared Dagger engine %s keeps the settings it started with until: devenv setup --skip-build (it restarts the engine, ending running dagger sessions; the cache stays and workspaces need not be recreated)", daggerEngineImage(running))
 	}
 	// Fetch the image while the old engine still serves: a failed download
 	// must not leave the machine without an engine.
-	if !exists || !current {
+	if !exists || renew {
 		if err := pullIfMissing(ctx, cfg, daggerEngineImage(version), stdout, stderr); err != nil {
 			return err
 		}
 	}
-	if exists && !current && replace {
+	if renew {
 		status(cfg, stdout, "replace: shared Dagger engine %s", daggerEngineImage(running))
 		// The old engine has exited before the new one opens the volume.
 		if err := stopAndRemoveContainer(ctx, name); err != nil {
@@ -162,10 +186,9 @@ func ensureDaggerEngine(ctx context.Context, cfg config, replace bool, stdout, s
 		}
 		exists = false
 	}
-	// A stopped engine needs the file to start again, so it is written on
-	// every run. An engine that is already running read it when it started.
-	if err := os.WriteFile(daggerConfigFile(cfg), engineConfig, 0o644); err != nil {
-		return fmt.Errorf("write Dagger engine configuration: %w", err)
+	// The engine needs its file each time it starts.
+	if err := writeDaggerEngineConfig(cfg, engineConfig); err != nil {
+		return err
 	}
 	if !exists {
 		status(cfg, stdout, "start: shared Dagger engine %s", daggerEngineImage(version))
