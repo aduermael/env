@@ -10,8 +10,10 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -31,6 +33,7 @@ const (
 	daggerEngineAlias      = "devenv-dagger"
 	daggerEnginePort       = "1234"
 	daggerStatePath        = "/var/lib/dagger"
+	daggerConfigPath       = "/etc/dagger/engine.json"
 	daggerReadyTimeout     = 3 * time.Minute
 )
 
@@ -60,23 +63,38 @@ func daggerEnvironment(version string) []string {
 	return []string{"DAGGER_ENGINE=" + daggerEngineAddress(version), "DEVENV_DAGGER_ENGINE_IMAGE=" + daggerEngineImage(version)}
 }
 
+// Docker Hub pulls go through the root's mirror, as for workspace daemons.
+// The mirror speaks plain HTTP. When it is down or lacks an image, BuildKit
+// moves on to Docker Hub itself; other registries are not mirrored.
+func daggerEngineConfig() []byte {
+	data, _ := json.Marshal(map[string]map[string]map[string]any{"registries": {
+		"docker.io":   {"mirrors": []string{mirrorAddress}},
+		mirrorAddress: {"http": true},
+	}})
+	return data
+}
+
+func daggerConfigFile(cfg config) string { return filepath.Join(cfg.Root, "dagger-engine.json") }
+
 // The engine runs as Dagger starts its own: privileged, always restarted, its
 // state on one volume. That volume belongs to this single container; two
 // engines on one state directory corrupt it. tcp:// has no authentication, so
 // the port is not published: it is reachable from the root's cache network,
-// which includes containers started inside a workspace.
-func daggerEngineArgs(cfg config, version string) []string {
+// which includes containers started inside a workspace. The spec covers the
+// engine's configuration too: its file keeps one path whatever it holds.
+func daggerEngineArgs(cfg config, version string, engineConfig []byte) []string {
 	name := daggerEngineName(cfg)
 	options := []string{"run", "-d", "--name", name, "--restart", "always", "--privileged",
 		"--label", labelManaged + "=true", "--label", labelRoot + "=" + cfg.Root, "--label", labelRole + "=" + daggerEngineRole,
 		"--label", daggerLabel + "=" + version,
 		"--network", cacheNetwork(cfg), "--network-alias", daggerEngineAlias, "--network-alias", daggerEngineHost(version),
 		"--mount", "type=volume,source=" + name + ",target=" + daggerStatePath,
+		"--mount", "type=bind,source=" + daggerConfigFile(cfg) + ",target=" + daggerConfigPath + ",readonly",
 		"--health-cmd", "buildctl dial-stdio --timeout 2",
 		"--health-interval", "5s", "--health-timeout", "5s", "--health-retries", "6", "--health-start-period", "60s"}
 	command := []string{daggerEngineImage(version),
 		"--addr", "unix:///run/dagger/engine.sock", "--addr", "tcp://0.0.0.0:" + daggerEnginePort}
-	spec := sha256.Sum256([]byte(strings.Join(append(append([]string{}, options...), command...), "\x00")))
+	spec := sha256.Sum256([]byte(strings.Join(append(append(append([]string{}, options...), command...), string(engineConfig)), "\x00")))
 	options = append(options, "--label", fmt.Sprintf("%s=%x", daggerSpecLabel, spec[:8]))
 	return append(options, command...)
 }
@@ -110,7 +128,8 @@ func ensureDaggerEngine(ctx context.Context, cfg config, replace bool, stdout, s
 	if err := ensureDockerVolume(ctx, cfg, name, daggerEngineRole); err != nil {
 		return err
 	}
-	args := daggerEngineArgs(cfg, version)
+	engineConfig := daggerEngineConfig()
+	args := daggerEngineArgs(cfg, version, engineConfig)
 	info, exists, err := inspectContainer(ctx, name)
 	if err != nil {
 		return err
@@ -124,6 +143,9 @@ func ensureDaggerEngine(ctx context.Context, cfg config, replace bool, stdout, s
 		notice(stderr, "the shared Dagger engine runs %s, but image %s installs Dagger %s; dagger stops with an error in workspaces of this image", daggerEngineImage(running), cfg.Image, version)
 		notice(stderr, "move the engine with: devenv setup --skip-build (workspaces on %s must then be recreated)", running)
 		return nil
+	}
+	if exists && !current && !replace {
+		notice(stderr, "the shared Dagger engine %s keeps the settings it started with until: devenv setup --skip-build (it restarts the engine, ending running dagger sessions; the cache stays and workspaces need not be recreated)", daggerEngineImage(running))
 	}
 	// Fetch the image while the old engine still serves: a failed download
 	// must not leave the machine without an engine.
@@ -139,6 +161,11 @@ func ensureDaggerEngine(ctx context.Context, cfg config, replace bool, stdout, s
 			return err
 		}
 		exists = false
+	}
+	// A stopped engine needs the file to start again, so it is written on
+	// every run. An engine that is already running read it when it started.
+	if err := os.WriteFile(daggerConfigFile(cfg), engineConfig, 0o644); err != nil {
+		return fmt.Errorf("write Dagger engine configuration: %w", err)
 	}
 	if !exists {
 		status(cfg, stdout, "start: shared Dagger engine %s", daggerEngineImage(version))

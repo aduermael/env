@@ -549,8 +549,9 @@ to inner Docker requests. Approved outer bind mounts remain accessible inside.
 publishing their ports on the Mac:
 
 - `devenv-mirror:5000` is a pull-through cache for Docker Hub image downloads.
-  Each inner daemon is configured to use it automatically. GHCR, ECR, and other
-  registries continue to work directly but aren't cached by this Hub mirror.
+  Each inner daemon and the shared Dagger engine are configured to use it
+  automatically. GHCR, ECR, and other registries continue to work directly but
+  aren't cached by this Hub mirror.
 - `devenv-cache:5000` is a writable registry for built layers. A pull-through
   registry cannot accept pushes, so these are separate services and stores.
 
@@ -596,8 +597,9 @@ That example shares a single Compose cache manifest: concurrent exports use
 last-writer-wins semantics. Use separate cache references with explicit imports
 when building different branches concurrently. BuildKit cache mounts (`RUN
 --mount=type=cache`) have their own cache lifecycle; registry cache exports do
-not automatically share those mutable stores. Dagger does not use these
-registries: it runs on the shared engine described below.
+not automatically share those mutable stores. Dagger pulls Docker Hub images
+through the mirror but does not use the build-cache registry: it keeps its
+cache on the shared engine described below.
 
 Normal `down` retains per-worktree engine data, the shared registries, and the
 shared Dagger engine. `down --all` removes the registry and Dagger engine
@@ -628,6 +630,10 @@ machine with the default `~/.devenv`), next to the registries:
   no authentication, and whoever reaches the port controls a privileged
   container, so it is not published on the Mac's interfaces. See below for who
   can still reach it.
+- It pulls Docker Hub images through `devenv-mirror:5000`, as the workspace
+  daemons do. devenv writes `~/.devenv/dagger-engine.json`, mounted read-only
+  at `/etc/dagger/engine.json`. When the mirror is down or fails a pull, the
+  engine pulls from Docker Hub directly. Other registries are not mirrored.
 - The workspace keeps its private Docker daemon and the exclusive lock on its
   data volume. Checks that use Docker still get that daemon. Only the Dagger
   runner moved out.
@@ -690,7 +696,10 @@ up` only creates or starts the engine. If the engine runs another release than
 the image, `up` says so and leaves it alone, because replacing it ends the
 sessions of every other workspace. If the engine cannot start, `up` reports it
 and starts the workspace anyway: only Dagger is affected. The cache survives a
-release change: the new engine opens the same volume.
+release change: the new engine opens the same volume. When a devenv update
+changes only the engine's settings, `up` also leaves the running engine alone
+and says so; `devenv setup --skip-build` replaces it on the same volume, and
+workspaces need not be recreated.
 
 `down --all` removes the engine container and keeps its volume. `down --all
 --delete-data` deletes the volume. To delete only the Dagger cache:

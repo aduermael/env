@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +34,8 @@ func entrypointDaggerSection(t *testing.T) string {
 
 // Starts the production engine for a temporary root, then runs the pinned CLI
 // behind the production wrapper in separate containers that share nothing but
-// the root's network. Uses only uniquely named resources and no bind mounts.
+// the root's network. Uses only uniquely named resources; the only bind mount
+// is the engine's configuration file in the temporary root.
 func TestSharedDaggerEngine(t *testing.T) {
 	if os.Getenv("DEVENV_TEST_DAGGER") != "1" {
 		t.Skip("set DEVENV_TEST_DAGGER=1 to exercise the shared Dagger engine")
@@ -84,16 +87,24 @@ func TestSharedDaggerEngine(t *testing.T) {
 	if run("inspect", engine, "--format", "{{.Id}}") != first {
 		t.Fatal("an unchanged engine was replaced")
 	}
-	want := "true always volume " + engine + " " + daggerStatePath + " {}"
-	if got := run("inspect", engine, "--format", "{{.HostConfig.Privileged}} {{.HostConfig.RestartPolicy.Name}}{{range .Mounts}} {{.Type}} {{.Name}} {{.Destination}}{{end}} {{json .HostConfig.PortBindings}}"); got != want {
+	want := "true always {}"
+	if got := run("inspect", engine, "--format", "{{.HostConfig.Privileged}} {{.HostConfig.RestartPolicy.Name}} {{json .HostConfig.PortBindings}}"); got != want {
 		t.Fatalf("engine container: %q, want %q", got, want)
+	}
+	mounts := strings.Split(run("inspect", engine, "--format", `{{range .Mounts}}{{.Type}} {{.Name}} {{.Destination}} {{.RW}}{{"\n"}}{{end}}`), "\n")
+	slices.Sort(mounts)
+	if want := []string{"bind  " + daggerConfigPath + " false", "volume " + engine + " " + daggerStatePath + " true"}; !slices.Equal(mounts, want) {
+		t.Fatalf("engine mounts: %q, want %q", mounts, want)
+	}
+	if got := run("exec", engine, "cat", daggerConfigPath); got != string(daggerEngineConfig()) {
+		t.Fatalf("engine configuration: %q", got)
 	}
 	// Dagger is very slow when its state directory is itself an overlay mount.
 	if fs := run("exec", engine, "stat", "-f", "-c", "%T", daggerStatePath); fs == "" || strings.Contains(fs, "overlay") {
 		t.Fatalf("engine state is on %q, not on a volume", fs)
 	}
 	// A second engine cannot be created on the same state volume.
-	if _, err := dockerOutput(ctx, daggerEngineArgs(cfg, version)...); err == nil {
+	if _, err := dockerOutput(ctx, daggerEngineArgs(cfg, version, daggerEngineConfig())...); err == nil {
 		t.Fatal("a second engine started on the same volume")
 	}
 
@@ -228,5 +239,29 @@ func TestSharedDaggerEngine(t *testing.T) {
 	if stale, err := staleDaggerWorkspaces(ctx, cfg, version); err != nil || len(stale) != 0 {
 		t.Fatalf("fixtures are not workspaces: %v %v", stale, err)
 	}
-	fmt.Fprintln(os.Stdout, "Shared engine, cross-workspace cache reuse, release mismatch, and state persistence verified.")
+
+	// An engine from an older devenv, with other settings at the same path,
+	// keeps serving on up and is replaced by setup on the same volume.
+	if err := stopAndRemoveContainer(ctx, engine); err != nil {
+		t.Fatal(err)
+	}
+	run(daggerEngineArgs(cfg, version, []byte("{}"))...)
+	older := run("inspect", engine, "--format", "{{.Id}}")
+	var notices bytes.Buffer
+	if err := ensureDaggerEngine(ctx, cfg, false, os.Stdout, &notices); err != nil {
+		t.Fatal(err)
+	}
+	if run("inspect", engine, "--format", "{{.Id}}") != older || !strings.Contains(notices.String(), "devenv setup --skip-build") {
+		t.Fatalf("up replaced the engine or did not say how to update it: %q", notices.String())
+	}
+	if err := ensureDaggerEngine(ctx, cfg, true, os.Stdout, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	if run("inspect", engine, "--format", "{{.Id}}") == older {
+		t.Fatal("setup kept the engine with older settings")
+	}
+	if got := mustDagger(a, nil, work); got != warm {
+		t.Fatalf("engine lost its cache when its settings changed: %q, want %q", got, warm)
+	}
+	fmt.Fprintln(os.Stdout, "Shared engine, cross-workspace cache reuse, release mismatch, settings change, and state persistence verified.")
 }
