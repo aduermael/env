@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,15 @@ const (
 	mirrorAddress     = "devenv-mirror:5000"
 	buildCacheAddress = "devenv-cache:5000"
 )
+
+// --mount values are CSV: a comma in a path must not split it.
+func mountOption(fields ...string) string {
+	var value strings.Builder
+	w := csv.NewWriter(&value)
+	_ = w.Write(fields)
+	w.Flush()
+	return strings.TrimSuffix(value.String(), "\n")
+}
 
 func cachePrefix(cfg config) string {
 	sum := sha256.Sum256([]byte(cfg.Root))

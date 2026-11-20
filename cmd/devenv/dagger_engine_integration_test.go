@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +34,8 @@ func entrypointDaggerSection(t *testing.T) string {
 
 // Starts the production engine for a temporary root, then runs the pinned CLI
 // behind the production wrapper in separate containers that share nothing but
-// the root's network. Uses only uniquely named resources and no bind mounts.
+// the root's network. Uses only uniquely named resources; the only bind mount
+// is the engine's configuration file in the temporary root.
 func TestSharedDaggerEngine(t *testing.T) {
 	if os.Getenv("DEVENV_TEST_DAGGER") != "1" {
 		t.Skip("set DEVENV_TEST_DAGGER=1 to exercise the shared Dagger engine")
@@ -65,13 +68,16 @@ func TestSharedDaggerEngine(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cfg.Root, "run"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	engine := daggerEngineName(cfg)
+	engine, mirror := daggerEngineName(cfg), cachePrefix(cfg)+"-image-mirror"
 	t.Cleanup(func() {
-		dockerOutput(context.Background(), "rm", "-f", engine)
+		dockerOutput(context.Background(), "rm", "-f", engine, mirror, cachePrefix(cfg)+"-build-cache")
 		if err := removeDockerCacheResources(context.Background(), cfg, true); err != nil {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
+	if err := ensureDockerCaches(ctx, cfg, os.Stdout); err != nil {
+		t.Fatal(err)
+	}
 	if err := ensureDaggerEngine(ctx, cfg, true, os.Stdout, os.Stderr); err != nil {
 		t.Fatal(err)
 	}
@@ -84,16 +90,24 @@ func TestSharedDaggerEngine(t *testing.T) {
 	if run("inspect", engine, "--format", "{{.Id}}") != first {
 		t.Fatal("an unchanged engine was replaced")
 	}
-	want := "true always volume " + engine + " " + daggerStatePath + " {}"
-	if got := run("inspect", engine, "--format", "{{.HostConfig.Privileged}} {{.HostConfig.RestartPolicy.Name}}{{range .Mounts}} {{.Type}} {{.Name}} {{.Destination}}{{end}} {{json .HostConfig.PortBindings}}"); got != want {
+	want := "true always {}"
+	if got := run("inspect", engine, "--format", "{{.HostConfig.Privileged}} {{.HostConfig.RestartPolicy.Name}} {{json .HostConfig.PortBindings}}"); got != want {
 		t.Fatalf("engine container: %q, want %q", got, want)
+	}
+	mounts := strings.Split(run("inspect", engine, "--format", `{{range .Mounts}}{{.Type}} {{.Name}} {{.Destination}} {{.RW}}{{"\n"}}{{end}}`), "\n")
+	slices.Sort(mounts)
+	if want := []string{"bind  " + daggerConfigPath + " false", "volume " + engine + " " + daggerStatePath + " true"}; !slices.Equal(mounts, want) {
+		t.Fatalf("engine mounts: %q, want %q", mounts, want)
+	}
+	if got := run("exec", engine, "cat", daggerConfigPath); got != string(daggerEngineConfig(cfg)) {
+		t.Fatalf("engine configuration: %q", got)
 	}
 	// Dagger is very slow when its state directory is itself an overlay mount.
 	if fs := run("exec", engine, "stat", "-f", "-c", "%T", daggerStatePath); fs == "" || strings.Contains(fs, "overlay") {
 		t.Fatalf("engine state is on %q, not on a volume", fs)
 	}
 	// A second engine cannot be created on the same state volume.
-	if _, err := dockerOutput(ctx, daggerEngineArgs(cfg, version)...); err == nil {
+	if _, err := dockerOutput(ctx, daggerEngineArgs(cfg, version, daggerEngineConfig(cfg))...); err == nil {
 		t.Fatal("a second engine started on the same volume")
 	}
 
@@ -165,6 +179,19 @@ func TestSharedDaggerEngine(t *testing.T) {
 	if !ok || len(token) != 36 {
 		t.Fatalf("first run output: %q", warm)
 	}
+	// Docker Hub downloads go through the root's mirror. alpine can come from
+	// the engine image's own content, so another image is pulled.
+	if got := mustDagger(a, nil, "container | from busybox:1.37 | with-exec -- echo pulled | stdout"); got != "pulled" {
+		t.Fatalf("busybox run: %q", got)
+	}
+	if catalog := run("exec", mirror, "wget", "-qO-", "http://127.0.0.1:5000/v2/_catalog"); !strings.Contains(catalog, `"library/busybox"`) {
+		t.Fatalf("the engine bypassed the mirror: %s", catalog)
+	}
+	// A stopped mirror leaves Docker Hub itself.
+	run("stop", mirror)
+	if got := mustDagger(a, nil, "container | from busybox:1.36 | with-exec -- echo pulled | stdout"); got != "pulled" {
+		t.Fatalf("busybox run without the mirror: %q", got)
+	}
 	// B never ran this. The same output means its step came from the engine's
 	// cache instead of running again.
 	if got := mustDagger(b, nil, work); got != warm {
@@ -228,5 +255,52 @@ func TestSharedDaggerEngine(t *testing.T) {
 	if stale, err := staleDaggerWorkspaces(ctx, cfg, version); err != nil || len(stale) != 0 {
 		t.Fatalf("fixtures are not workspaces: %v %v", stale, err)
 	}
-	fmt.Fprintln(os.Stdout, "Shared engine, cross-workspace cache reuse, release mismatch, and state persistence verified.")
+
+	// An engine from an older devenv, started with other settings,
+	// keeps serving on up and is replaced by setup on the same volume.
+	if err := stopAndRemoveContainer(ctx, engine); err != nil {
+		t.Fatal(err)
+	}
+	startOlder := func() string {
+		t.Helper()
+		if err := writeDaggerEngineConfig(cfg, []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+		run(daggerEngineArgs(cfg, version, []byte("{}"))...)
+		if err := waitForHealthy(ctx, "Dagger engine", engine, daggerReadyTimeout); err != nil {
+			t.Fatal(err)
+		}
+		return run("inspect", engine, "--format", "{{.Id}}")
+	}
+	settings := func() string { t.Helper(); return run("exec", engine, "cat", daggerConfigPath) }
+	older := startOlder()
+	var notices bytes.Buffer
+	if err := ensureDaggerEngine(ctx, cfg, false, os.Stdout, &notices); err != nil {
+		t.Fatal(err)
+	}
+	if run("inspect", engine, "--format", "{{.Id}}") != older || settings() != "{}" || !strings.Contains(notices.String(), "devenv setup --skip-build") {
+		t.Fatalf("up replaced the engine, changed its settings, or did not say how to update it: %q", notices.String())
+	}
+	if err := ensureDaggerEngine(ctx, cfg, true, os.Stdout, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	if run("inspect", engine, "--format", "{{.Id}}") == older || settings() != string(daggerEngineConfig(cfg)) {
+		t.Fatal("setup kept the engine with older settings")
+	}
+	if got := mustDagger(a, nil, work); got != warm {
+		t.Fatalf("engine lost its cache when its settings changed: %q, want %q", got, warm)
+	}
+	// A stopped engine serves no session, so up gives it the new settings.
+	if err := stopAndRemoveContainer(ctx, engine); err != nil {
+		t.Fatal(err)
+	}
+	older = startOlder()
+	run("stop", engine)
+	if err := ensureDaggerEngine(ctx, cfg, false, os.Stdout, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	if run("inspect", engine, "--format", "{{.Id}}") == older || settings() != string(daggerEngineConfig(cfg)) {
+		t.Fatal("up started a stopped engine with older settings")
+	}
+	fmt.Fprintln(os.Stdout, "Shared engine, cross-workspace cache reuse, release mismatch, settings change, and state persistence verified.")
 }

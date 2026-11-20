@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"os/exec"
@@ -17,7 +19,8 @@ const testDaggerVersion = "v1.0.0-beta.28"
 
 func TestDaggerEngineIsOnePrivilegedContainerOnOneVolume(t *testing.T) {
 	cfg := config{Root: "/Users/me/.devenv"}
-	args := daggerEngineArgs(cfg, testDaggerVersion)
+	engineConfig := daggerEngineConfig(cfg)
+	args := daggerEngineArgs(cfg, testDaggerVersion, engineConfig)
 	name := daggerEngineName(cfg)
 	for _, pair := range [][2]string{
 		{"--name", name},
@@ -41,29 +44,69 @@ func TestDaggerEngineIsOnePrivilegedContainerOnOneVolume(t *testing.T) {
 	if image < 0 || strings.Join(args[image+1:], " ") != "--addr unix:///run/dagger/engine.sock --addr tcp://0.0.0.0:1234" {
 		t.Fatalf("engine image or listeners: %v", args)
 	}
-	if countArgPair(args, "--mount") != 1 {
-		t.Fatalf("engine state must be the only mount: %v", args)
+	// Besides its state, the engine sees only its configuration file, read-only.
+	configMount := "type=bind,source=" + daggerConfigFile(cfg, engineConfig) + ",target=/etc/dagger/engine.json,readonly"
+	if countArgPair(args, "--mount") != 2 || !containsArgPair(args, "--mount", configMount) || !strings.HasPrefix(configMount, "type=bind,source=/Users/me/.devenv/dagger-engine-") {
+		t.Fatalf("engine mounts: %v", args)
 	}
 	for _, arg := range args {
-		if arg == "-p" || arg == "--publish" || arg == "-v" || strings.Contains(arg, "type=bind") || strings.Contains(arg, "docker.sock") {
+		if arg == "-p" || arg == "--publish" || arg == "-v" || (strings.Contains(arg, "type=bind") && arg != configMount) || strings.Contains(arg, "docker.sock") {
 			t.Fatalf("engine exposes host resources: %v", args)
 		}
 	}
 
 	// One engine and one state volume per root, whatever the release: a
 	// second container can never be created on the same volume.
-	next := daggerEngineArgs(cfg, "v1.0.0-beta.29")
+	next := daggerEngineArgs(cfg, "v1.0.0-beta.29", engineConfig)
 	if !containsArgPair(next, "--name", name) || !containsArgPair(next, "--mount", "type=volume,source="+name+",target=/var/lib/dagger") {
 		t.Fatalf("a new release must reuse the engine name and volume: %v", next)
 	}
 	if daggerSpec(args) == "" || daggerSpec(args) == daggerSpec(next) {
 		t.Fatalf("a new release must be detected as a different engine: %q %q", daggerSpec(args), daggerSpec(next))
 	}
-	if daggerSpec(args) != daggerSpec(daggerEngineArgs(cfg, testDaggerVersion)) {
+	if daggerSpec(args) != daggerSpec(daggerEngineArgs(cfg, testDaggerVersion, daggerEngineConfig(cfg))) {
 		t.Fatal("an unchanged engine must not be replaced")
+	}
+	// Other settings live in another file: a running engine keeps its own.
+	older := daggerEngineArgs(cfg, testDaggerVersion, []byte("{}"))
+	if daggerSpec(args) == daggerSpec(older) || daggerConfigFile(cfg, []byte("{}")) == daggerConfigFile(cfg, engineConfig) {
+		t.Fatal("an engine with other settings must be detected as a different engine")
+	}
+	if comma := daggerEngineArgs(config{Root: "/Users/me/dev,env"}, testDaggerVersion, engineConfig); !slices.ContainsFunc(comma, func(arg string) bool {
+		return strings.HasPrefix(arg, `type=bind,"source=/Users/me/dev,env/dagger-engine-`)
+	}) {
+		t.Fatalf("a comma in the root splits the mount: %v", comma)
 	}
 	if other := (config{Root: "/Users/me/other"}); daggerEngineName(other) == name {
 		t.Fatal("different roots share an engine volume")
+	}
+}
+
+// Dagger reads registries from its configuration file; see RegistryConfig in
+// the engine's config package.
+func TestDaggerEnginePullsDockerHubThroughTheMirror(t *testing.T) {
+	var engineConfig struct {
+		Registries map[string]struct {
+			Mirrors []string `json:"mirrors"`
+			HTTP    *bool    `json:"http"`
+		} `json:"registries"`
+	}
+	cfg := config{Root: "/Users/me/.devenv"}
+	decoder := json.NewDecoder(bytes.NewReader(daggerEngineConfig(cfg)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&engineConfig); err != nil {
+		t.Fatal(err)
+	}
+	// A dotless name never leaves the engine's resolver.
+	address := "devenv-mirror." + cacheNetwork(cfg) + ":5000"
+	hub, mirror := engineConfig.Registries["docker.io"], engineConfig.Registries[address]
+	if len(engineConfig.Registries) != 2 || !slices.Equal(hub.Mirrors, []string{address}) || hub.HTTP != nil {
+		t.Fatalf("registries: %s", daggerEngineConfig(cfg))
+	}
+	// The mirror has its own entry: without it, it would inherit Docker
+	// Hub's settings and be reached over HTTPS.
+	if mirror.HTTP == nil || !*mirror.HTTP || len(mirror.Mirrors) != 0 {
+		t.Fatalf("mirror is not reached over plain HTTP: %s", daggerEngineConfig(cfg))
 	}
 }
 
